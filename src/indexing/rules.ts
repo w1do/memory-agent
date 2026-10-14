@@ -57,6 +57,7 @@ export const EXPORT_RE: Record<string, RegExp> = {
 };
 EXPORT_RE.vue = EXPORT_RE.javascript;
 EXPORT_RE.svelte = EXPORT_RE.javascript;
+EXPORT_RE.astro = EXPORT_RE.javascript;
 
 export const IMPORT_RE: Record<string, RegExp[]> = {
   typescript: [
@@ -75,4 +76,5 @@ export const IMPORT_RE: Record<string, RegExp[]> = {
 IMPORT_RE.javascript = IMPORT_RE.typescript;
 IMPORT_RE.vue = IMPORT_RE.typescript;
 IMPORT_RE.svelte = IMPORT_RE.typescript;
+IMPORT_RE.astro = IMPORT_RE.typescript;
 IMPORT_RE.scss = IMPORT_RE.css;

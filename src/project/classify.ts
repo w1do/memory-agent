@@ -4,7 +4,7 @@ const LANGUAGES: Record<string, string> = {
   '.ts': 'typescript', '.tsx': 'typescript', '.js': 'javascript', '.jsx': 'javascript',
   '.mjs': 'javascript', '.cjs': 'javascript', '.php': 'php', '.py': 'python', '.go': 'go',
   '.rs': 'rust', '.java': 'java', '.vue': 'vue', '.svelte': 'svelte', '.css': 'css',
-  '.scss': 'scss', '.md': 'markdown', '.mdx': 'markdown', '.json': 'json', '.yaml': 'yaml',
+  '.scss': 'scss', '.astro': 'astro', '.md': 'markdown', '.mdx': 'markdown', '.json': 'json', '.yaml': 'yaml',
   '.yml': 'yaml', '.toml': 'toml', '.sql': 'sql', '.sh': 'shell',
 };
 

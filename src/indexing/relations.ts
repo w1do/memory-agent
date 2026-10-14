@@ -1,7 +1,7 @@
 import { posix } from 'node:path';
 import type { FileRecord, Relation } from '../shared/types.js';
 
-const EXTS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.vue', '.svelte', '.php', '.py', '.go', '.rs', '.java', '.css', '.scss', '.md'];
+const EXTS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.vue', '.svelte', '.astro', '.php', '.py', '.go', '.rs', '.java', '.css', '.scss', '.md'];
 const stripExt = (p: string) => p.replace(/\.[a-z0-9]+$/i, '');
 
 export class PathIndex {
