@@ -1,10 +1,18 @@
 import { globToRegExp } from '../project/glob.js';
 
+/**
+ * Always excluded, independent of `.memoryignore`, so projects initialised by older
+ * versions (whose ignore file lacks these entries) do not index tool or build output.
+ */
 export const DEFAULT_EXCLUDES = [
-  '.git/', '.memory/', 'node_modules/', 'vendor/', 'dist/', 'build/', '.next/',
+  '.git/', '.memory/', '.memoryignore',
+  'node_modules/', 'vendor/', 'dist/', 'build/', '.next/', '.nuxt/', '.astro/', '.svelte-kit/',
   '.cache/', 'coverage/', 'tmp/', 'logs/',
+  '.claude/', '.codex/', '.junie/', '.cursor/', '.opencode/', '.idea/', '.vscode/',
   '.env', '.env.*', '*.pem', '*.key', '*.crt', '*.p12', '*.pfx', 'id_rsa*',
   '*.sqlite', '*.db',
+  '*.lock', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'go.sum', 'composer.lock',
+  '*.min.js', '*.min.css', '*.map',
 ];
 
 /** Extensions never read, regardless of ignore files. */

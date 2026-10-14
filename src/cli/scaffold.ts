@@ -101,9 +101,18 @@ temp/
 *.pb.go
 *_pb2.py
 
-# IDE and OS
+# Framework, AI-agent and IDE tool folders
+.astro/
+.svelte-kit/
+.claude/
+.codex/
+.junie/
+.cursor/
+.opencode/
 .idea/
 .vscode/
+
+# IDE and OS
 .DS_Store
 Thumbs.db
 
