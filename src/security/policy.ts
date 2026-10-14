@@ -1,0 +1,35 @@
+import { globToRegExp } from '../project/glob.js';
+
+export const DEFAULT_EXCLUDES = [
+  '.git/', '.memory/', 'node_modules/', 'vendor/', 'dist/', 'build/', '.next/',
+  '.cache/', 'coverage/', 'tmp/', 'logs/',
+  '.env', '.env.*', '*.pem', '*.key', '*.crt', '*.p12', '*.pfx', 'id_rsa*',
+  '*.sqlite', '*.db',
+];
+
+/** Extensions never read, regardless of ignore files. */
+export const FORBIDDEN_EXTENSIONS = new Set([
+  '.pem', '.key', '.crt', '.p12', '.pfx', '.sqlite', '.db', '.keystore', '.jks',
+  '.png', '.jpg', '.jpeg', '.gif', '.ico', '.webp', '.pdf', '.zip', '.gz', '.tgz',
+  '.woff', '.woff2', '.ttf', '.eot', '.mp3', '.mp4', '.exe', '.dll', '.so', '.wasm',
+]);
+
+export const MAX_FILE_SIZE = 512 * 1024;
+
+export class ExcludeMatcher {
+  private readonly rules: RegExp[];
+
+  constructor(patterns: string[]) {
+    this.rules = patterns.map(globToRegExp);
+  }
+
+  matches(relativePath: string): boolean {
+    const p = relativePath.replace(/\\/g, '/');
+    return this.rules.some((re) => re.test(p));
+  }
+}
+
+export function hasForbiddenExtension(relativePath: string): boolean {
+  const dot = relativePath.lastIndexOf('.');
+  return dot >= 0 && FORBIDDEN_EXTENSIONS.has(relativePath.slice(dot).toLowerCase());
+}

@@ -1,0 +1,37 @@
+{
+  "name": "project-memory",
+  "version": "0.1.0",
+  "description": "Local project code memory for AI agents: Qdrant + Typesense + SQLite behind an MCP server",
+  "type": "module",
+  "bin": {
+    "memory": "dist/cli/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepare": "npm run build",
+    "test": "vitest run --exclude test/integration",
+    "test:integration": "vitest run test/integration",
+    "prepack": "npm run build"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "@qdrant/js-client-rest": "1.19.0",
+    "chokidar": "5.0.0",
+    "commander": "15.0.0",
+    "typesense": "3.1.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "typescript": "7.0.2",
+    "vitest": "5.0.4"
+  }
+}

@@ -1,0 +1,188 @@
+import { DatabaseSync } from 'node:sqlite';
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { SCHEMA } from './schema.js';
+import type { Chunk, FileRecord, Relation, SymbolRecord } from '../shared/types.js';
+
+type Row = Record<string, string | number | null>;
+
+const toFile = (r: Row): FileRecord => ({
+  id: r.id as string, path: r.path as string, relativePath: r.relative_path as string,
+  language: r.language as string, size: r.size as number, sha256: r.sha256 as string,
+  mtimeMs: r.mtime_ms as number, gitBranch: r.git_branch as string, gitCommit: r.git_commit as string,
+  isTest: !!r.is_test, isDocumentation: !!r.is_documentation, isConfig: !!r.is_config,
+  indexedAt: r.indexed_at as string, indexVersion: r.index_version as number,
+});
+
+/** Canonical local manifest. Qdrant and Typesense are derived from it and can be rebuilt. */
+export class Manifest {
+  private readonly db: DatabaseSync;
+
+  constructor(file: string) {
+    mkdirSync(dirname(file), { recursive: true });
+    this.db = new DatabaseSync(file);
+    this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = OFF;');
+    this.db.exec(SCHEMA);
+  }
+
+  close(): void { this.db.close(); }
+
+  private all(sql: string, ...params: Array<string | number>): Row[] {
+    return this.db.prepare(sql).all(...params) as Row[];
+  }
+
+  private run(sql: string, ...params: Array<string | number | null>): void {
+    this.db.prepare(sql).run(...params);
+  }
+
+  tx<T>(fn: () => T): T {
+    this.db.exec('BEGIN');
+    try { const v = fn(); this.db.exec('COMMIT'); return v; }
+    catch (e) { this.db.exec('ROLLBACK'); throw e; }
+  }
+
+  ensureProject(id: string, name: string, root: string): void {
+    this.run('INSERT OR IGNORE INTO projects(id,name,root,created_at) VALUES(?,?,?,?)', id, name, root, new Date().toISOString());
+  }
+
+  getMeta(key: string): string | undefined {
+    return this.all('SELECT value FROM meta WHERE key=?', key)[0]?.value as string | undefined;
+  }
+  setMeta(key: string, value: string): void {
+    this.run('INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', key, value);
+  }
+
+  listFiles(): FileRecord[] { return this.all('SELECT * FROM files ORDER BY relative_path').map(toFile); }
+  getFile(rel: string): FileRecord | undefined {
+    const r = this.all('SELECT * FROM files WHERE relative_path=?', rel)[0];
+    return r ? toFile(r) : undefined;
+  }
+  getFileById(id: string): FileRecord | undefined {
+    const r = this.all('SELECT * FROM files WHERE id=?', id)[0];
+    return r ? toFile(r) : undefined;
+  }
+
+  upsertFile(f: FileRecord): void {
+    this.run(
+      `INSERT INTO files(id,path,relative_path,language,size,sha256,mtime_ms,git_branch,git_commit,is_test,is_documentation,is_config,indexed_at,index_version,status)
+       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,'indexed')
+       ON CONFLICT(id) DO UPDATE SET path=excluded.path, relative_path=excluded.relative_path, language=excluded.language,
+         size=excluded.size, sha256=excluded.sha256, mtime_ms=excluded.mtime_ms, git_branch=excluded.git_branch,
+         git_commit=excluded.git_commit, is_test=excluded.is_test, is_documentation=excluded.is_documentation,
+         is_config=excluded.is_config, indexed_at=excluded.indexed_at, index_version=excluded.index_version, status='indexed'`,
+      f.id, f.path, f.relativePath, f.language, f.size, f.sha256, f.mtimeMs, f.gitBranch, f.gitCommit,
+      +f.isTest, +f.isDocumentation, +f.isConfig, f.indexedAt, f.indexVersion,
+    );
+  }
+
+  touchFile(id: string, mtimeMs: number, gitCommit: string, gitBranch: string): void {
+    this.run('UPDATE files SET mtime_ms=?, git_commit=?, git_branch=? WHERE id=?', mtimeMs, gitCommit, gitBranch, id);
+  }
+
+  deleteFile(id: string): void {
+    for (const t of ['chunks', 'symbols', 'imports', 'exports']) this.run(`DELETE FROM ${t} WHERE file_id=?`, id);
+    const f = this.getFileById(id);
+    if (f) this.run('DELETE FROM relations WHERE from_path=?', f.relativePath);
+    this.run('DELETE FROM files WHERE id=?', id);
+  }
+
+  chunkIds(fileId: string): Array<{ chunkId: string; embedded: boolean }> {
+    return this.all('SELECT chunk_id, embedded FROM chunks WHERE file_id=?', fileId)
+      .map((r) => ({ chunkId: r.chunk_id as string, embedded: !!r.embedded }));
+  }
+
+  replaceChunks(fileId: string, chunks: Chunk[], embedded: Set<string>): void {
+    this.run('DELETE FROM chunks WHERE file_id=?', fileId);
+    for (const c of chunks) {
+      this.run(
+        'INSERT INTO chunks(chunk_id,file_id,line_start,line_end,symbol,chunk_type,content_hash,embedded) VALUES(?,?,?,?,?,?,?,?)',
+        c.chunkId, fileId, c.lineStart, c.lineEnd, c.symbol, c.chunkType, c.contentHash, embedded.has(c.chunkId) ? 1 : 0,
+      );
+    }
+  }
+
+  pathsWithUnembedded(): string[] {
+    return this.all(
+      `SELECT DISTINCT f.relative_path FROM chunks c JOIN files f ON f.id=c.file_id WHERE c.embedded=0`,
+    ).map((r) => r.relative_path as string);
+  }
+
+  markEmbedded(chunkIds: string[]): void {
+    for (const id of chunkIds) this.run('UPDATE chunks SET embedded=1 WHERE chunk_id=?', id);
+  }
+
+  replaceStructure(fileId: string, symbols: SymbolRecord[], imports: string[], exports: string[]): void {
+    for (const t of ['symbols', 'imports', 'exports']) this.run(`DELETE FROM ${t} WHERE file_id=?`, fileId);
+    for (const s of symbols) {
+      this.run('INSERT INTO symbols VALUES(?,?,?,?,?,?)', fileId, s.name, s.kind, s.lineStart, s.lineEnd, +s.exported);
+    }
+    for (const i of imports) this.run('INSERT INTO imports VALUES(?,?)', fileId, i);
+    for (const e of exports) this.run('INSERT INTO exports VALUES(?,?)', fileId, e);
+  }
+
+  symbolsOf(fileId: string): SymbolRecord[] {
+    return this.all('SELECT * FROM symbols WHERE file_id=? ORDER BY line_start', fileId).map((r) => ({
+      name: r.name as string, kind: r.kind as string, lineStart: r.line_start as number,
+      lineEnd: r.line_end as number, exported: !!r.exported,
+    }));
+  }
+  importsOf(fileId: string): string[] {
+    return this.all('SELECT specifier FROM imports WHERE file_id=?', fileId).map((r) => r.specifier as string);
+  }
+  exportsOf(fileId: string): string[] {
+    return this.all('SELECT name FROM exports WHERE file_id=?', fileId).map((r) => r.name as string);
+  }
+  findSymbols(name: string, limit = 20): Array<{ name: string; kind: string; path: string; lineStart: number }> {
+    return this.all(
+      `SELECT s.name, s.kind, s.line_start, f.relative_path FROM symbols s JOIN files f ON f.id=s.file_id
+       WHERE s.name LIKE ? ORDER BY s.exported DESC LIMIT ?`, `%${name}%`, limit,
+    ).map((r) => ({ name: r.name as string, kind: r.kind as string, path: r.relative_path as string, lineStart: r.line_start as number }));
+  }
+
+  replaceRelations(fromPath: string, relations: Relation[]): void {
+    this.run('DELETE FROM relations WHERE from_path=?', fromPath);
+    for (const r of relations) this.run('INSERT OR IGNORE INTO relations VALUES(?,?,?)', r.fromPath, r.toPath, r.kind);
+  }
+  relationsFrom(path: string): Relation[] { return this.rel('from_path', path); }
+  relationsTo(path: string): Relation[] { return this.rel('to_path', path); }
+  private rel(col: string, path: string): Relation[] {
+    return this.all(`SELECT * FROM relations WHERE ${col}=?`, path).map((r) => ({
+      fromPath: r.from_path as string, toPath: r.to_path as string, kind: r.kind as Relation['kind'],
+    }));
+  }
+
+  startRun(kind: string): number {
+    this.run('INSERT INTO index_runs(kind,started_at) VALUES(?,?)', kind, new Date().toISOString());
+    return this.all('SELECT last_insert_rowid() AS id')[0].id as number;
+  }
+  finishRun(id: number, indexed: number, removed: number, errors: number): void {
+    this.run('UPDATE index_runs SET finished_at=?, files_indexed=?, files_removed=?, errors=? WHERE id=?',
+      new Date().toISOString(), indexed, removed, errors, id);
+    this.setMeta('last_sync_at', new Date().toISOString());
+  }
+  lastRuns(limit = 5): Row[] { return this.all('SELECT * FROM index_runs ORDER BY id DESC LIMIT ?', limit); }
+
+  recordError(path: string, message: string): void {
+    this.run('DELETE FROM index_errors WHERE path=?', path);
+    this.run('INSERT INTO index_errors VALUES(?,?,?)', path, message, new Date().toISOString());
+  }
+  clearError(path: string): void { this.run('DELETE FROM index_errors WHERE path=?', path); }
+  errors(limit = 20): Array<{ path: string; message: string; at: string }> {
+    return this.all('SELECT * FROM index_errors ORDER BY at DESC LIMIT ?', limit) as never;
+  }
+
+  counts(): { files: number; chunks: number; errors: number } {
+    const n = (t: string) => this.all(`SELECT COUNT(*) AS n FROM ${t}`)[0].n as number;
+    return { files: n('files'), chunks: n('chunks'), errors: n('index_errors') };
+  }
+
+  recentFiles(limit = 10): FileRecord[] {
+    return this.all('SELECT * FROM files ORDER BY indexed_at DESC LIMIT ?', limit).map(toFile);
+  }
+
+  resetDerivedState(): void {
+    this.run('UPDATE chunks SET embedded=0');
+    this.run('DELETE FROM files');
+    for (const t of ['chunks', 'symbols', 'imports', 'exports', 'relations']) this.run(`DELETE FROM ${t}`);
+  }
+}
