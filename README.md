@@ -38,8 +38,37 @@ EMBEDDING_DIMENSIONS=1536
 
 ## Команды
 
-`init`, `start`, `stop`, `status`, `doctor`, `index`, `sync`, `watch`, `reindex`, `docs`, `search "<query>"`, `mcp --project <abs path>`.
-`memory docs` пишет `.memory/generated/project-memory.md` строго по фактам индекса.
+Все команды запускаются из корня проекта. Опция `--path <dir>` (где поддерживается) указывает другой каталог проекта.
+
+| Команда | Что делает |
+| --- | --- |
+| `memory init` | Создаёт `.memory/` и `.memoryignore`, поднимает Qdrant и Typesense, создаёт коллекции, индексирует проект, делает тестовый поиск и пишет `.memory/mcp.example.json`. |
+| `memory start` | Запускает Qdrant и Typesense через Docker Compose (данные сохраняются). |
+| `memory stop` | Останавливает контейнеры. Данные в `.memory/data/` не удаляются. |
+| `memory status [--json]` | Показывает состояние сервисов, число файлов и chunks, ошибки, дату последней синхронизации и число устаревших файлов. |
+| `memory doctor` | Диагностирует Docker, Qdrant, Typesense, embeddings и манифест и показывает реальный режим поиска. |
+| `memory index` | Индексирует новые и изменённые файлы. |
+| `memory sync` | Синхронизирует изменения: новые, изменённые, переименованные и удалённые файлы. Неизменённые не перечитываются. |
+| `memory watch` | Следит за файлами с debounce и обновляет только изменённые. Завершается по `Ctrl+C`. |
+| `memory reindex` | Удаляет Qdrant и Typesense и пересобирает их из SQLite-манифеста. Для полной пересборки. |
+| `memory reindex <paths...>` | Переиндексирует только указанные файлы (пути относительно корня проекта). Удалённые файлы убираются из индексов. Директории не раскрываются в файлы. |
+| `memory search "<query>"` | Ищет по памяти проекта. Опции: `--mode hybrid\|lexical\|semantic`, `--limit <n>`, `--language <lang>`, `--max-chars <n>`, `--json`. |
+| `memory docs` | Пишет `.memory/generated/project-memory.md` строго по фактам индекса. |
+| `memory mcp --project <abs path>` | Запускает MCP-сервер по stdio. Требует абсолютный путь к проекту. |
+
+Примеры:
+
+```bash
+memory init --path ./my-project --no-start   # только конфигурация и .memory/
+memory init --no-index                       # без первичной индексации
+memory sync
+memory reindex src/auth/AuthService.ts src/auth/TokenService.ts
+memory search "где авторизация" --mode hybrid --limit 5 --max-chars 2000
+memory search "AuthService" --language typescript --json
+memory mcp --project /abs/path/to/my-project
+```
+
+Флаги `init`: `--path <dir>`, `--no-start`, `--no-index`, `--yes` (поведение по умолчанию, режим без вопросов). Повторный `init` идемпотентен: данные и `.env` не трогаются, неизменённые файлы не переиндексируются.
 
 ## MCP
 
@@ -52,6 +81,50 @@ EMBEDDING_DIMENSIONS=1536
 Инструменты: `memory_search`, `memory_get_context`, `memory_get_file`, `memory_related`, `memory_update`, `memory_sync`, `memory_status`, `memory_project_structure`.
 Ресурсы: `memory://project/overview|structure|status`, `memory://file/{path}`.
 Перед поиском выполняется быстрая проверка mtime/размера; устаревшие файлы помечаются `is_stale`. После правок агент вызывает `memory_update` (или работает `memory watch`).
+
+## Проверка индекса вручную
+
+Порты и имя коллекции лежат в `.memory/config.json` (поля `qdrantPort`, `typesensePort`, `collection`). Ключ Typesense — в `.memory/.env` (`TYPESENSE_API_KEY`). Все проверки читают данные и ничего не меняют.
+
+### SQLite (`.memory/index.db`) — канонический манифест
+
+```bash
+sqlite3 .memory/index.db "SELECT COUNT(*) AS files FROM files;"
+sqlite3 .memory/index.db "SELECT relative_path, size, language, indexed_at FROM files ORDER BY relative_path;"
+sqlite3 .memory/index.db "SELECT COUNT(*) AS chunks FROM chunks;"
+sqlite3 .memory/index.db "SELECT path, message, at FROM index_errors ORDER BY at DESC LIMIT 20;"
+sqlite3 .memory/index.db "SELECT relative_path FROM files WHERE relative_path LIKE 'node_modules/%' OR relative_path LIKE '%.lock' OR relative_path LIKE '%.env%';"
+```
+
+Последний запрос должен вернуть пустой результат: мусор и секреты в индекс попадать не должны. Если `sqlite3` не установлен, используйте `apt install sqlite3` или `brew install sqlite`.
+
+### Qdrant (семантический индекс)
+
+```bash
+curl -s http://127.0.0.1:<qdrantPort>/collections/<collection>
+curl -s -X POST http://127.0.0.1:<qdrantPort>/collections/<collection>/points/count -H 'Content-Type: application/json' -d '{"exact": true}'
+```
+
+В ответе `points_count` должен совпадать с числом chunks из SQLite, которые помечены как `embedded = 1`. Если точек нет, а ключ `EMBEDDING_API_KEY` задан, выполните `memory reindex`.
+
+### Typesense (полнотекстовый индекс)
+
+```bash
+curl -s http://127.0.0.1:<typesensePort>/health
+curl -s http://127.0.0.1:<typesensePort>/collections/<collection> -H "X-TYPESENSE-API-KEY: <TYPESENSE_API_KEY>"
+curl -s "http://127.0.0.1:<typesensePort>/collections/<collection>/documents/search?q=AuthService&query_by=symbol,content" -H "X-TYPESENSE-API-KEY: <TYPESENSE_API_KEY>"
+```
+
+Первый запрос должен вернуть `{"ok":true}`. Во втором поле `num_documents` показывает число chunks. В третьем видны найденные документы с полями `path` и `line_start`. Значение `<TYPESENSE_API_KEY>` возьмите из `.memory/.env` и не публикуйте его.
+
+### Сводная проверка
+
+```bash
+memory status
+memory doctor
+```
+
+`memory doctor` сверяет состояние Docker, Qdrant, Typesense и embeddings и показывает режим поиска.
 
 ## Troubleshooting
 

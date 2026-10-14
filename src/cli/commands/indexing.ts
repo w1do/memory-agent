@@ -10,7 +10,14 @@ type P = { path?: string };
 
 export const syncCommand = (o: P, kind = 'sync') => withContext(o.path, async (ctx) => printSync(await syncProject(ctx, { kind })));
 
-export const reindexCommand = (o: P) => withContext(o.path, async (ctx) => {
+export const reindexCommand = (o: P, paths: string[] = []) => withContext(o.path, async (ctx) => {
+  if (paths.length) {
+    const results = await updatePaths(ctx, paths);
+    results.forEach((r) => console.log(`${r.status.padEnd(8)} ${r.path}${r.reason ? `  (${r.reason})` : ''}`));
+    const errors = results.filter((r) => r.status === 'error').length;
+    console.log(`reindexed ${results.length} path(s), errors ${errors}`);
+    return;
+  }
   console.log('Dropping derived indexes (Qdrant, Typesense) and rebuilding from source…');
   await ctx.typesense.dropCollection();
   await ctx.qdrant.dropCollection();

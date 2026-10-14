@@ -25,7 +25,9 @@ program.command('doctor').option(path).description('Diagnose the environment').a
 program.command('index').option(path).description('Index new and changed files').action(act((o) => syncCommand(o, 'index')));
 program.command('sync').option(path).description('Sync changes (new, changed, renamed, deleted)').action(act((o) => syncCommand(o)));
 program.command('watch').option(path).description('Watch files and update the index').action(act(watchCommand));
-program.command('reindex').option(path).description('Rebuild Qdrant and Typesense from source').action(act(reindexCommand));
+program.command('reindex [paths...]').option(path)
+  .description('Rebuild Qdrant and Typesense from source, or only the given paths')
+  .action(act((paths: string[], o: { path?: string }) => reindexCommand(o, paths)));
 program.command('docs').option(path).description('Generate .memory/generated/project-memory.md').action(act(docsCommand));
 program.command('mcp').requiredOption('--project <dir>', 'absolute project path')
   .description('Run MCP server over stdio').action(act(mcpCommand));
