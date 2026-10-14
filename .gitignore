@@ -2,3 +2,5 @@ node_modules/
 dist/
 .memory/
 *.tgz
+.idea/
+.junie/mcp/
