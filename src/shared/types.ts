@@ -62,10 +62,20 @@ export interface SearchHit {
   lexicalScore: number;
   semanticScore: number;
   snippet?: string;
+  annotation?: string;
   indexed_at: string;
   content_hash: string;
   is_stale: boolean;
   git_commit: string;
+}
+
+export interface Annotation {
+  relativePath: string;
+  summary: string;
+  role: string;
+  contentHash: string;
+  author: string;
+  updatedAt: string;
 }
 
 export type SearchMode = 'hybrid' | 'lexical' | 'semantic';

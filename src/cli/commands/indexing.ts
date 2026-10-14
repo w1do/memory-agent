@@ -18,11 +18,9 @@ export const reindexCommand = (o: P, paths: string[] = []) => withContext(o.path
     console.log(`reindexed ${results.length} path(s), errors ${errors}`);
     return;
   }
-  console.log('Dropping derived indexes (Qdrant, Typesense) and rebuilding from source…');
-  await ctx.typesense.dropCollection();
-  await ctx.qdrant.dropCollection();
-  ctx.manifest.resetDerivedState();
-  printSync(await syncProject(ctx, { kind: 'reindex' }));
+  console.log('Re-reading all indexed files. Existing Qdrant and Typesense data is kept; embeddings are created only for new chunks.');
+  const known = ctx.manifest.listFiles().map((f) => f.relativePath);
+  printSync(await syncProject(ctx, { kind: 'reindex', force: known }));
 });
 
 const DEBOUNCE_MS = 500;

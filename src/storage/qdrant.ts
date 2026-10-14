@@ -16,6 +16,7 @@ export interface QdrantPayload {
   content_hash: string;
   git_commit: string;
   updated_at: string;
+  summary: string;
 }
 
 export interface QdrantPoint { chunkId: string; vector: number[]; payload: QdrantPayload }

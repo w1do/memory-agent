@@ -50,6 +50,19 @@ async function semantic(ctx: MemoryContext, p: SearchParams, limit: number, byId
   }
 }
 
+/** Attaches an agent annotation only while it matches the file's current sha256. */
+export function attachAnnotations(ctx: MemoryContext, hits: SearchHit[]): void {
+  const byPath = new Map<string, string | undefined>();
+  for (const h of hits) {
+    if (!byPath.has(h.path)) {
+      const file = ctx.manifest.getFile(h.path);
+      const annotation = ctx.manifest.getAnnotation(h.path);
+      byPath.set(h.path, file && annotation && annotation.contentHash === file.sha256 ? annotation.summary : undefined);
+    }
+    h.annotation = byPath.get(h.path);
+  }
+}
+
 export async function searchMemory(ctx: MemoryContext, p: SearchParams): Promise<SearchResult> {
   const mode = p.mode ?? 'hybrid';
   const limit = Math.min(p.limit ?? 10, 10);
@@ -88,6 +101,7 @@ export async function searchMemory(ctx: MemoryContext, p: SearchParams): Promise
     for (const [id, c] of await ctx.typesense.contentOf(missing)) text.set(id, c);
     picked.forEach((h) => { const c = text.get(h.chunkId); if (c) h.snippet = makeSnippet(c, p.query); });
   }
+  attachAnnotations(ctx, picked);
   const { items, truncated } = applyBudget(picked, budgetToChars(p.token_budget, p.max_chars));
   return { hits: items, mode, degraded, warnings, truncated };
 }

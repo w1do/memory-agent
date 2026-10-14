@@ -15,6 +15,7 @@ export interface TsDoc {
   imports: string[];
   exports: string[];
   title: string;
+  summary: string;
   content: string;
   chunk_type: string;
   is_test: boolean;
@@ -28,6 +29,8 @@ export interface TsDoc {
 }
 
 export interface TsHit { doc: TsDoc; score: number }
+
+const SUMMARY_FIELD = { name: 'summary', type: 'string', optional: true } as const;
 
 export interface TypesenseOptions { host: string; port: number; apiKey: string; collection: string }
 
@@ -53,7 +56,7 @@ export class TypesenseStore {
 
   async ensureCollection(): Promise<void> {
     const exists = await this.client.collections(this.opts.collection).exists();
-    if (exists) return;
+    if (exists) return this.ensureSummaryField();
     await this.client.collections().create({
       name: this.opts.collection,
       token_separators: ['-', '_', '.', '/'],
@@ -70,6 +73,7 @@ export class TypesenseStore {
         { name: 'imports', type: 'string[]' },
         { name: 'exports', type: 'string[]' },
         { name: 'title', type: 'string' },
+        SUMMARY_FIELD,
         { name: 'content', type: 'string' },
         { name: 'chunk_type', type: 'string', facet: true },
         { name: 'is_test', type: 'bool' },
@@ -84,13 +88,20 @@ export class TypesenseStore {
     });
   }
 
+  /** Adds the summary field to collections created before annotations existed. */
+  private async ensureSummaryField(): Promise<void> {
+    const info = await this.client.collections(this.opts.collection).retrieve();
+    if (info.fields?.some((f) => f.name === SUMMARY_FIELD.name)) return;
+    await this.client.collections(this.opts.collection).update({ fields: [SUMMARY_FIELD] });
+  }
+
   async dropCollection(): Promise<void> {
     if (await this.client.collections(this.opts.collection).exists()) {
       await this.client.collections(this.opts.collection).delete();
     }
   }
 
-  toDocs(file: FileRecord, chunks: Chunk[], symbols: string[], projectId: string): TsDoc[] {
+  toDocs(file: FileRecord, chunks: Chunk[], symbols: string[], projectId: string, summary: string): TsDoc[] {
     const slash = file.relativePath.lastIndexOf('/');
     return chunks.map((c) => ({
       id: c.chunkId, chunk_id: c.chunkId, file_id: file.id, project_id: projectId,
@@ -99,7 +110,7 @@ export class TypesenseStore {
       directory: slash >= 0 ? file.relativePath.slice(0, slash) : '.',
       language: file.language, symbol: c.symbol, symbols: symbols,
       imports: c.imports, exports: c.exports,
-      title: c.symbol || file.relativePath.slice(slash + 1),
+      title: c.symbol || file.relativePath.slice(slash + 1), summary,
       content: c.content, chunk_type: c.chunkType,
       is_test: file.isTest, is_documentation: file.isDocumentation,
       git_branch: file.gitBranch, git_commit: file.gitCommit, content_hash: c.contentHash,
@@ -131,9 +142,9 @@ export class TypesenseStore {
   async search(query: string, limit: number, language?: string): Promise<TsHit[]> {
     const res = await this.client.collections<TsDoc>(this.opts.collection).documents().search({
       q: query || '*',
-      query_by: 'path,symbol,file_name,symbols,exports,imports,title,content',
-      query_by_weights: '10,9,8,5,5,4,3,2',
-      prefix: 'true,true,true,true,true,true,true,false',
+      query_by: 'path,symbol,file_name,symbols,exports,imports,title,summary,content',
+      query_by_weights: '10,9,8,5,5,4,3,6,2',
+      prefix: 'true,true,true,true,true,true,true,true,false',
       num_typos: 1,
       drop_tokens_threshold: 5,
       per_page: limit,

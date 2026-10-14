@@ -11,6 +11,45 @@ import { updatePaths } from '../indexing/update.js';
 import { syncProject } from '../indexing/sync.js';
 import { checkFreshness } from '../search/freshness.js';
 import { safe } from './result.js';
+import { resolveInside } from '../project/paths.js';
+import { hasForbiddenExtension } from '../security/policy.js';
+import { redact } from '../security/redact.js';
+import { MemoryError } from '../shared/errors.js';
+
+export const ANNOTATION_MAX_LENGTH = 200;
+export const ANNOTATION_ROLES = ['module', 'entry', 'test', 'config', 'doc', 'other'] as const;
+
+export interface AnnotateInput {
+  path: string;
+  summary: string;
+  role: (typeof ANNOTATION_ROLES)[number];
+  content_hash: string;
+}
+
+/** Stores an agent annotation only for an indexed, non-excluded file whose hash matches the index. Never touches project files. */
+export function annotateFile(ctx: MemoryContext, input: AnnotateInput) {
+  const { rel } = resolveInside(ctx.root, input.path);
+  if (ctx.matcher.matches(rel) || hasForbiddenExtension(rel)) {
+    throw new MemoryError(`Annotation refused by memory policy: ${rel}`, 'access_denied');
+  }
+  const file = ctx.manifest.getFile(rel);
+  if (!file) throw new MemoryError(`File is not indexed: ${rel}`, 'not_indexed');
+  if (file.sha256 !== input.content_hash) {
+    throw new MemoryError(`content_hash does not match the indexed file: ${rel}. Run memory_update first.`, 'hash_mismatch');
+  }
+  const summary = input.summary.trim();
+  if (!summary || summary.length > ANNOTATION_MAX_LENGTH) {
+    throw new MemoryError(`summary must be 1..${ANNOTATION_MAX_LENGTH} characters`, 'invalid_summary');
+  }
+  if (redact(summary) !== summary) {
+    throw new MemoryError('summary contains sensitive values and was refused', 'secret_detected');
+  }
+  ctx.manifest.upsertAnnotation({
+    relativePath: rel, summary, role: input.role, contentHash: file.sha256, author: 'agent', updatedAt: new Date().toISOString(),
+  });
+  ctx.logger.info(`memory_annotate: ${rel}`);
+  return { path: rel, role: input.role, content_hash: file.sha256, saved: true };
+}
 
 const budget = {
   token_budget: z.number().int().positive().max(20000).optional().describe('Approximate token limit for the response'),
@@ -62,6 +101,16 @@ export function registerTools(server: McpServer, ctx: MemoryContext): void {
     const r = await syncProject(ctx);
     return { added: r.added.length, changed: r.changed.length, renamed: r.renamed.length, removed: r.removed.length, unchanged: r.unchanged, errors: r.errors, semantic: r.semantic };
   }));
+
+  server.registerTool('memory_annotate', {
+    description: 'Save a short agent-written summary (max 200 chars) for an indexed file. Requires the current content_hash of the file.',
+    inputSchema: {
+      path: z.string().min(1),
+      summary: z.string().min(1).max(ANNOTATION_MAX_LENGTH),
+      role: z.enum(ANNOTATION_ROLES),
+      content_hash: z.string().min(1),
+    },
+  }, safe((a) => annotateFile(ctx, a)));
 
   server.registerTool('memory_status', {
     description: 'State of Qdrant, Typesense, embeddings, counts, last sync, stale files and search mode.',

@@ -39,4 +39,8 @@ CREATE TABLE IF NOT EXISTS index_runs (
 CREATE TABLE IF NOT EXISTS index_errors (
   path TEXT NOT NULL, message TEXT NOT NULL, at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS annotations (
+  relative_path TEXT PRIMARY KEY, summary TEXT NOT NULL, role TEXT NOT NULL,
+  content_hash TEXT NOT NULL, author TEXT NOT NULL DEFAULT 'agent', updated_at TEXT NOT NULL
+);
 `;

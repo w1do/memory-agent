@@ -2,9 +2,14 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { SCHEMA } from './schema.js';
-import type { Chunk, FileRecord, Relation, SymbolRecord } from '../shared/types.js';
+import type { Annotation, Chunk, FileRecord, Relation, SymbolRecord } from '../shared/types.js';
 
 type Row = Record<string, string | number | null>;
+
+const toAnnotation = (r: Row): Annotation => ({
+  relativePath: r.relative_path as string, summary: r.summary as string, role: r.role as string,
+  contentHash: r.content_hash as string, author: r.author as string, updatedAt: r.updated_at as string,
+});
 
 const toFile = (r: Row): FileRecord => ({
   id: r.id as string, path: r.path as string, relativePath: r.relative_path as string,
@@ -82,7 +87,10 @@ export class Manifest {
   deleteFile(id: string): void {
     for (const t of ['chunks', 'symbols', 'imports', 'exports']) this.run(`DELETE FROM ${t} WHERE file_id=?`, id);
     const f = this.getFileById(id);
-    if (f) this.run('DELETE FROM relations WHERE from_path=?', f.relativePath);
+    if (f) {
+      this.run('DELETE FROM relations WHERE from_path=?', f.relativePath);
+      this.run('DELETE FROM annotations WHERE relative_path=?', f.relativePath);
+    }
     this.run('DELETE FROM files WHERE id=?', id);
   }
 
@@ -178,6 +186,36 @@ export class Manifest {
 
   recentFiles(limit = 10): FileRecord[] {
     return this.all('SELECT * FROM files ORDER BY indexed_at DESC LIMIT ?', limit).map(toFile);
+  }
+
+  upsertAnnotation(a: Annotation): void {
+    this.run(
+      `INSERT INTO annotations(relative_path,summary,role,content_hash,author,updated_at) VALUES(?,?,?,?,?,?)
+       ON CONFLICT(relative_path) DO UPDATE SET summary=excluded.summary, role=excluded.role,
+         content_hash=excluded.content_hash, author=excluded.author, updated_at=excluded.updated_at`,
+      a.relativePath, a.summary, a.role, a.contentHash, a.author, a.updatedAt,
+    );
+  }
+
+  getAnnotation(relativePath: string): Annotation | undefined {
+    const r = this.all('SELECT * FROM annotations WHERE relative_path=?', relativePath)[0];
+    return r ? toAnnotation(r) : undefined;
+  }
+
+  listAnnotations(): Annotation[] {
+    return this.all('SELECT * FROM annotations ORDER BY relative_path').map(toAnnotation);
+  }
+
+  /** Files without an annotation, or whose annotation was written for an older content hash. */
+  pendingAnnotations(limit = 20): Array<{ relativePath: string; sha256: string }> {
+    return this.all(
+      `SELECT f.relative_path, f.sha256 FROM files f LEFT JOIN annotations a ON a.relative_path=f.relative_path
+       WHERE a.relative_path IS NULL OR a.content_hash<>f.sha256 ORDER BY f.relative_path LIMIT ?`, limit,
+    ).map((r) => ({ relativePath: r.relative_path as string, sha256: r.sha256 as string }));
+  }
+
+  deleteAnnotation(relativePath: string): void {
+    this.run('DELETE FROM annotations WHERE relative_path=?', relativePath);
   }
 
   resetDerivedState(): void {

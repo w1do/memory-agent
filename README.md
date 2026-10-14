@@ -4,7 +4,7 @@
 
 - **Typesense** — быстрый полнотекстовый, path- и symbol-поиск.
 - **Qdrant** — семантический поиск по embeddings (Polza.AI, OpenAI-compatible).
-- **SQLite** (`.memory/index.db`) — канонический манифест. Qdrant/Typesense — производные, пересоздаются `memory reindex`.
+- **SQLite** (`.memory/index.db`) — канонический манифест: файлы, chunks, символы, связи и аннотации агента. Qdrant/Typesense — производные индексы, которые `memory reindex` обновляет без удаления.
 - Имя коллекции = slug имени папки + хеш пути (например `my-app-3fa91c`).
 - Всё слушает только `127.0.0.1`, в Docker Compose.
 
@@ -50,9 +50,9 @@ EMBEDDING_DIMENSIONS=1536
 | `memory index` | Индексирует новые и изменённые файлы. |
 | `memory sync` | Синхронизирует изменения: новые, изменённые, переименованные и удалённые файлы. Неизменённые не перечитываются. |
 | `memory watch` | Следит за файлами с debounce и обновляет только изменённые. Завершается по `Ctrl+C`. |
-| `memory reindex` | Удаляет Qdrant и Typesense и пересобирает их из SQLite-манифеста. Для полной пересборки. |
+| `memory reindex` | Перечитывает все проиндексированные файлы и обновляет Qdrant и Typesense без их удаления. Embeddings создаются только для новых chunks. Аннотации агента (`memory_annotate`) сохраняются и попадают в поиск. |
 | `memory reindex <paths...>` | Переиндексирует только указанные файлы (пути относительно корня проекта). Удалённые файлы убираются из индексов. Директории не раскрываются в файлы. |
-| `memory search "<query>"` | Ищет по памяти проекта. По умолчанию выводит только уникальные пути найденных файлов (помечает `STALE`, если файл изменён после индексации). Опции: `--snippets` (диапазон строк, символ, score и фрагмент кода), `--mode hybrid\|lexical\|semantic`, `--limit <n>`, `--language <lang>`, `--max-chars <n>`, `--json`. |
+| `memory search "<query>"` | Ищет по памяти проекта. По умолчанию выводит только уникальные пути найденных файлов и строку актуальной аннотации под путём (помечает `STALE`, если файл изменён после индексации). Опции: `--snippets` (диапазон строк, символ, score и фрагмент кода), `--mode hybrid\|lexical\|semantic`, `--limit <n>`, `--language <lang>`, `--max-chars <n>`, `--json`. |
 | `memory docs` | Пишет `.memory/generated/project-memory.md` строго по фактам индекса. |
 | `memory mcp --project <abs path>` | Запускает MCP-сервер по stdio. Требует абсолютный путь к проекту. |
 
@@ -79,9 +79,20 @@ memory mcp --project /abs/path/to/my-project
 { "mcpServers": { "project-memory": { "command": "memory", "args": ["mcp", "--project", "/abs/path/to/project"] } } }
 ```
 
-Инструменты: `memory_search`, `memory_get_context`, `memory_get_file`, `memory_related`, `memory_update`, `memory_sync`, `memory_status`, `memory_project_structure`.
+Инструменты: `memory_search`, `memory_get_context`, `memory_get_file`, `memory_related`, `memory_update`, `memory_sync`, `memory_annotate`, `memory_status`, `memory_project_structure`.
 Ресурсы: `memory://project/overview|structure|status`, `memory://file/{path}`.
 Перед поиском выполняется быстрая проверка mtime/размера; устаревшие файлы помечаются `is_stale`. После правок агент вызывает `memory_update` (или работает `memory watch`).
+
+### Аннотации агента (`memory_annotate`)
+
+Агент может сохранить короткое описание файла, которое попадает в индекс и помогает поиску понять назначение файла без чтения кода.
+
+- Параметры: `path` (относительно корня проекта), `summary` (от 1 до 200 символов), `role` (`module`, `entry`, `test`, `config`, `doc`, `other`), `content_hash` (sha256 текущего файла, его можно получить командой `sha256sum <path>`).
+- Аннотация принимается только для проиндексированного файла, чей `content_hash` совпадает с индексом. Если файл изменился, сначала вызовите `memory_update`.
+- Описания, содержащие секреты, отклоняются. Файлы проекта инструмент не меняет.
+- Аннотация хранится в таблице `annotations` манифеста и переживает `memory reindex`. Если файл изменился, старая аннотация перестаёт использоваться, пока агент не запишет новую.
+- Аннотация учитывается в полнотекстовом поиске Typesense и в payload Qdrant.
+- `memory search` выводит аннотацию строкой под путём файла (в обычном и в `--snippets` режиме). Аннотация показывается только если её `content_hash` совпадает с текущим файлом; устаревшие не выводятся.
 
 ## Проверка индекса вручную
 
@@ -94,6 +105,7 @@ sqlite3 .memory/index.db "SELECT COUNT(*) AS files FROM files;"
 sqlite3 .memory/index.db "SELECT relative_path, size, language, indexed_at FROM files ORDER BY relative_path;"
 sqlite3 .memory/index.db "SELECT COUNT(*) AS chunks FROM chunks;"
 sqlite3 .memory/index.db "SELECT path, message, at FROM index_errors ORDER BY at DESC LIMIT 20;"
+sqlite3 .memory/index.db "SELECT relative_path, role, summary, author, updated_at FROM annotations ORDER BY relative_path;"
 sqlite3 .memory/index.db "SELECT relative_path FROM files WHERE relative_path LIKE 'node_modules/%' OR relative_path LIKE '%.lock' OR relative_path LIKE '%.env%';"
 ```
 
@@ -132,8 +144,8 @@ memory doctor
 - `memory doctor` — реальное состояние Docker, Qdrant, Typesense, embeddings, манифеста.
 - Контейнер unhealthy: `docker compose -f .memory/docker-compose.yml logs`.
 - Порт занят: поменяйте `qdrantPort`/`typesensePort` в `config.json`, затем `memory init`.
-- Индекс расходится: `memory reindex`.
-- Смена модели embeddings/размерности: `memory reindex`.
+- Индекс расходится: `memory reindex` (перечитывает файлы и обновляет индексы без удаления).
+- Смена модели embeddings или размерности: текущий `memory reindex` не пересчитывает векторы уже проиндексированных chunks. Полного пересчёта пока нет.
 
 ## Rollback
 

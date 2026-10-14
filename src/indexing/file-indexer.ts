@@ -41,6 +41,7 @@ export class FileIndexer {
     const rel = input.relativePath;
     const text = redact(buffer.toString('utf8'));
     const file = this.toRecord(input, buffer, rel);
+    const summary = this.summaryOf(file);
     const chunks = this.toChunks(file, text);
     const imports = this.importsOf(file, text);
     const exports = extractExports(file.language, text);
@@ -55,9 +56,9 @@ export class FileIndexer {
 
     await this.ctx.typesense.deleteChunks(stale);
     await this.ctx.qdrant.deleteChunks(stale);
-    await this.ctx.typesense.upsert(this.ctx.typesense.toDocs(file, chunks, symbols.map((s) => s.name), config.projectId));
-    const embedded = await this.embed(file, fresh);
-    await this.refreshPayloads(file, chunks.filter((c) => previous.get(c.chunkId)));
+    await this.ctx.typesense.upsert(this.ctx.typesense.toDocs(file, chunks, symbols.map((s) => s.name), config.projectId, summary));
+    const embedded = await this.embed(file, fresh, summary);
+    await this.refreshPayloads(file, chunks.filter((c) => previous.get(c.chunkId)), summary);
 
     manifest.tx(() => {
       manifest.upsertFile(file);
@@ -96,34 +97,41 @@ export class FileIndexer {
     });
   }
 
+  /** Agent annotation is used only while it matches the current content hash. */
+  private summaryOf(file: FileRecord): string {
+    const annotation = this.ctx.manifest.getAnnotation(file.relativePath);
+    return annotation && annotation.contentHash === file.sha256 ? annotation.summary : '';
+  }
+
   private importsOf(file: FileRecord, text: string): string[] {
     if (basename(file.relativePath) === 'package.json') return extractPackageDeps(text);
     if (file.language === 'markdown') return extractDocLinks(text);
     return extractImports(file.language, text);
   }
 
-  private payload(file: FileRecord, c: Chunk): QdrantPayload {
+  private payload(file: FileRecord, c: Chunk, summary: string): QdrantPayload {
     const slash = file.relativePath.lastIndexOf('/');
     return {
       project_id: this.ctx.config.projectId, chunk_id: c.chunkId, file_id: file.id, path: file.relativePath,
       file_name: file.relativePath.slice(slash + 1), directory: slash >= 0 ? file.relativePath.slice(0, slash) : '.',
       language: file.language, symbol: c.symbol, chunk_type: c.chunkType, line_start: c.lineStart,
       line_end: c.lineEnd, content_hash: c.contentHash, git_commit: file.gitCommit, updated_at: file.indexedAt,
+      summary,
     };
   }
 
-  private async refreshPayloads(file: FileRecord, kept: Chunk[]): Promise<void> {
+  private async refreshPayloads(file: FileRecord, kept: Chunk[], summary: string): Promise<void> {
     if (this.semantic !== 'ok' || !kept.length) return;
-    await this.ctx.qdrant.updatePayloads(kept.map((c) => ({ chunkId: c.chunkId, payload: this.payload(file, c) })));
+    await this.ctx.qdrant.updatePayloads(kept.map((c) => ({ chunkId: c.chunkId, payload: this.payload(file, c, summary) })));
   }
 
   /** Embeds only new chunks. Failure degrades to lexical mode instead of failing indexing. */
-  private async embed(file: FileRecord, fresh: Chunk[]): Promise<string[]> {
+  private async embed(file: FileRecord, fresh: Chunk[], summary: string): Promise<string[]> {
     if (!fresh.length || this.semantic === 'unavailable') return [];
     try {
       const vectors = await this.ctx.embeddings.embedBatch(fresh.map((c) => `${c.path}\n${c.symbol}\n${c.content}`.slice(0, 6000)));
       await this.ctx.qdrant.ensureCollection(vectors[0].length);
-      await this.ctx.qdrant.upsert(fresh.map((c, i) => ({ chunkId: c.chunkId, vector: vectors[i], payload: this.payload(file, c) })));
+      await this.ctx.qdrant.upsert(fresh.map((c, i) => ({ chunkId: c.chunkId, vector: vectors[i], payload: this.payload(file, c, summary) })));
       this.semantic = 'ok';
       return fresh.map((c) => c.chunkId);
     } catch (e) {
