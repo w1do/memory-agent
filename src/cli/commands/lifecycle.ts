@@ -15,5 +15,8 @@ export async function statusCommand(o: { path?: string; json?: boolean }): Promi
     line('qdrant', s.qdrant); line('typesense', s.typesense); line('embeddings', s.embeddings);
     console.log(`files ${s.files}, chunks ${s.chunks}, errors ${s.errors}, stale ${s.stale_files}, unindexed ${s.unindexed_files}`);
     console.log(`last sync: ${s.last_sync_at ?? 'never'}; search mode: ${s.search_mode}`);
+    const [recent] = ctx.manifest.recentFiles(1);
+    console.log(`last file: ${recent?.relativePath ?? 'none'}`);
+    console.log(`last_path: indexing ${s.last_path.indexing ?? 'null'}, embedding ${s.last_path.embedding ?? 'null'}`);
   });
 }
