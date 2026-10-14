@@ -52,7 +52,7 @@ EMBEDDING_DIMENSIONS=1536
 | `memory watch` | Следит за файлами с debounce и обновляет только изменённые. Завершается по `Ctrl+C`. |
 | `memory reindex` | Удаляет Qdrant и Typesense и пересобирает их из SQLite-манифеста. Для полной пересборки. |
 | `memory reindex <paths...>` | Переиндексирует только указанные файлы (пути относительно корня проекта). Удалённые файлы убираются из индексов. Директории не раскрываются в файлы. |
-| `memory search "<query>"` | Ищет по памяти проекта. Опции: `--mode hybrid\|lexical\|semantic`, `--limit <n>`, `--language <lang>`, `--max-chars <n>`, `--json`. |
+| `memory search "<query>"` | Ищет по памяти проекта. По умолчанию выводит только уникальные пути найденных файлов (помечает `STALE`, если файл изменён после индексации). Опции: `--snippets` (диапазон строк, символ, score и фрагмент кода), `--mode hybrid\|lexical\|semantic`, `--limit <n>`, `--language <lang>`, `--max-chars <n>`, `--json`. |
 | `memory docs` | Пишет `.memory/generated/project-memory.md` строго по фактам индекса. |
 | `memory mcp --project <abs path>` | Запускает MCP-сервер по stdio. Требует абсолютный путь к проекту. |
 
@@ -63,7 +63,8 @@ memory init --path ./my-project --no-start   # только конфигурац
 memory init --no-index                       # без первичной индексации
 memory sync
 memory reindex src/auth/AuthService.ts src/auth/TokenService.ts
-memory search "где авторизация" --mode hybrid --limit 5 --max-chars 2000
+memory search "где авторизация" --mode hybrid --limit 5   # только пути файлов
+memory search "где авторизация" --snippets --max-chars 2000   # с символами, score и фрагментами
 memory search "AuthService" --language typescript --json
 memory mcp --project /abs/path/to/my-project
 ```

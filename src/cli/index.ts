@@ -33,6 +33,7 @@ program.command('mcp').requiredOption('--project <dir>', 'absolute project path'
   .description('Run MCP server over stdio').action(act(mcpCommand));
 program.command('search <query>').option(path).option('--mode <mode>', 'hybrid|lexical|semantic')
   .option('--limit <n>').option('--language <lang>').option('--max-chars <n>').option('--json')
+  .option('--snippets', 'show symbols, scores and code snippets (default: paths only)')
   .description('Search project memory').action(act(searchCommand));
 
 program.parseAsync().catch(handleError);

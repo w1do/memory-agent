@@ -29,7 +29,8 @@ description: Навык для работы с локальной памятью
 Если MCP недоступен, используй CLI:
 
 ```bash
-memory search "<запрос>" --limit 10 --max-chars 2000
+memory search "<запрос>" --limit 10          # только пути файлов (по умолчанию)
+memory search "<запрос>" --snippets --max-chars 2000   # символы, диапазоны строк и фрагменты
 memory search "<запрос>" --json
 memory status
 ```
@@ -69,7 +70,7 @@ memory status
 ```bash
 memory status [--json]                         # состояние индекса и сервисов
 memory doctor                                  # диагностика Docker, Qdrant, Typesense, embeddings
-memory search "<запрос>" --limit 10 --max-chars 2000 [--mode hybrid|lexical|semantic] [--language <lang>] [--json]
+memory search "<запрос>" --limit 10 [--snippets] [--max-chars 2000] [--mode hybrid|lexical|semantic] [--language <lang>] [--json]   # по умолчанию только пути
 memory sync                                    # инкрементальная синхронизация (новые, изменённые, переименованные, удалённые)
 memory reindex <путь1> <путь2>                 # переиндексация только указанных файлов
 memory reindex                                 # полная пересборка: только по явной просьбе пользователя
