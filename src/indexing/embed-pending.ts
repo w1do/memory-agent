@@ -8,6 +8,8 @@ export interface EmbedPendingResult { embedded: number; status: 'ok' | 'unavaila
 
 const textOf = (c: PendingChunk): string => `${c.relativePath}\n${c.symbol}\n${c.content}`.slice(0, 6000);
 
+export const EMBED_CHECKPOINT_KEY = 'last_embed_path';
+
 /** Embeds all chunks with embedded = 0 in shared batches across files. A failure keeps them pending for the next sync. */
 export async function embedPending(ctx: MemoryContext, opts: EmbedPendingOptions): Promise<EmbedPendingResult> {
   const { manifest, embeddings, qdrant, logger, config } = ctx;
@@ -34,9 +36,11 @@ export async function embedPending(ctx: MemoryContext, opts: EmbedPendingOptions
           payload: toPayload(config.projectId, { id: c.fileId, relativePath: c.relativePath, language: c.language, gitCommit: c.gitCommit, indexedAt: c.indexedAt }, c, c.summary),
         })));
         manifest.markChunksEmbedded(batch.map((c) => c.chunkId));
+        manifest.setMeta(EMBED_CHECKPOINT_KEY, batch[batch.length - 1].relativePath);
         embedded += batch.length;
       }));
     }
+    manifest.setMeta(EMBED_CHECKPOINT_KEY, '');
     return { embedded, status: 'ok', error: '' };
   } catch (e) {
     const error = redact((e as Error).message);

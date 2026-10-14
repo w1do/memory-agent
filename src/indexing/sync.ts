@@ -9,7 +9,7 @@ import type { FileRecord } from '../shared/types.js';
 import { rebuildRelations } from './rebuild-relations.js';
 import { embedPending } from './embed-pending.js';
 
-const CHECKPOINT_KEY = 'last_index_path';
+export const CHECKPOINT_KEY = 'last_index_path';
 const DEFAULT_CONCURRENCY = 20;
 const DEFAULT_EMBED_BATCH = 96;
 const DEFAULT_EMBED_CONCURRENCY = 2;
