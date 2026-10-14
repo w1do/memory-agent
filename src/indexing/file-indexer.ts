@@ -14,10 +14,22 @@ import type { QdrantPayload } from '../storage/qdrant.js';
 export interface IndexInput { relativePath: string; absolutePath: string; mtimeMs: number; language: string }
 export type IndexOutcome = 'indexed' | 'skipped';
 
-/** Indexes files one by one into SQLite, Typesense and (when available) Qdrant. */
+export interface PayloadFile { id: string; relativePath: string; language: string; gitCommit: string; indexedAt: string }
+export interface PayloadChunk { chunkId: string; symbol: string; chunkType: string; lineStart: number; lineEnd: number; contentHash: string }
+
+export const toPayload = (projectId: string, file: PayloadFile, c: PayloadChunk, summary: string): QdrantPayload => {
+  const slash = file.relativePath.lastIndexOf('/');
+  return {
+    project_id: projectId, chunk_id: c.chunkId, file_id: file.id, path: file.relativePath,
+    file_name: file.relativePath.slice(slash + 1), directory: slash >= 0 ? file.relativePath.slice(0, slash) : '.',
+    language: file.language, symbol: c.symbol, chunk_type: c.chunkType, line_start: c.lineStart,
+    line_end: c.lineEnd, content_hash: c.contentHash, git_commit: file.gitCommit, updated_at: file.indexedAt,
+    summary,
+  };
+};
+
+/** Indexes files one by one into SQLite and Typesense; embeddings are produced later in the batched phase. */
 export class FileIndexer {
-  semantic: 'unknown' | 'ok' | 'unavailable' = 'unknown';
-  semanticError = '';
   private pathIndex = new PathIndex([]);
   private stems = new Map<string, string[]>();
   private readonly branch: string;
@@ -51,18 +63,16 @@ export class FileIndexer {
     chunks.forEach((c) => { c.relatedPaths = relatedPaths; c.imports = imports.slice(0, 30); c.exports = exports.slice(0, 30); });
 
     const previous = new Map(manifest.chunkIds(file.id).map((c) => [c.chunkId, c.embedded]));
-    const fresh = chunks.filter((c) => !previous.get(c.chunkId));
     const stale = [...previous.keys()].filter((id) => !chunks.some((c) => c.chunkId === id));
 
     await this.ctx.typesense.deleteChunks(stale);
     await this.ctx.qdrant.deleteChunks(stale);
     await this.ctx.typesense.upsert(this.ctx.typesense.toDocs(file, chunks, symbols.map((s) => s.name), config.projectId, summary));
-    const embedded = await this.embed(file, fresh, summary);
     await this.refreshPayloads(file, chunks.filter((c) => previous.get(c.chunkId)), summary);
 
     manifest.tx(() => {
       manifest.upsertFile(file);
-      const done = new Set([...previous].filter(([, e]) => e).map(([id]) => id).concat(embedded));
+      const done = new Set([...previous].filter(([, e]) => e).map(([id]) => id));
       manifest.replaceChunks(file.id, chunks, done);
       manifest.replaceStructure(file.id, symbols, imports, exports);
       manifest.replaceRelations(rel, relations);
@@ -109,36 +119,13 @@ export class FileIndexer {
     return extractImports(file.language, text);
   }
 
-  private payload(file: FileRecord, c: Chunk, summary: string): QdrantPayload {
-    const slash = file.relativePath.lastIndexOf('/');
-    return {
-      project_id: this.ctx.config.projectId, chunk_id: c.chunkId, file_id: file.id, path: file.relativePath,
-      file_name: file.relativePath.slice(slash + 1), directory: slash >= 0 ? file.relativePath.slice(0, slash) : '.',
-      language: file.language, symbol: c.symbol, chunk_type: c.chunkType, line_start: c.lineStart,
-      line_end: c.lineEnd, content_hash: c.contentHash, git_commit: file.gitCommit, updated_at: file.indexedAt,
-      summary,
-    };
-  }
-
+  /** Keeps vector payloads of already embedded chunks in sync; best-effort, a failure must not stop indexing. */
   private async refreshPayloads(file: FileRecord, kept: Chunk[], summary: string): Promise<void> {
-    if (this.semantic !== 'ok' || !kept.length) return;
-    await this.ctx.qdrant.updatePayloads(kept.map((c) => ({ chunkId: c.chunkId, payload: this.payload(file, c, summary) })));
-  }
-
-  /** Embeds only new chunks. Failure degrades to lexical mode instead of failing indexing. */
-  private async embed(file: FileRecord, fresh: Chunk[], summary: string): Promise<string[]> {
-    if (!fresh.length || this.semantic === 'unavailable') return [];
+    if (!kept.length) return;
     try {
-      const vectors = await this.ctx.embeddings.embedBatch(fresh.map((c) => `${c.path}\n${c.symbol}\n${c.content}`.slice(0, 6000)));
-      await this.ctx.qdrant.ensureCollection(vectors[0].length);
-      await this.ctx.qdrant.upsert(fresh.map((c, i) => ({ chunkId: c.chunkId, vector: vectors[i], payload: this.payload(file, c, summary) })));
-      this.semantic = 'ok';
-      return fresh.map((c) => c.chunkId);
+      await this.ctx.qdrant.updatePayloads(kept.map((c) => ({ chunkId: c.chunkId, payload: toPayload(this.ctx.config.projectId, file, c, summary) })));
     } catch (e) {
-      this.semantic = 'unavailable';
-      this.semanticError = redact((e as Error).message);
-      this.ctx.logger.warn(`semantic_search_unavailable: ${this.semanticError}`);
-      return [];
+      this.ctx.logger.warn(`payload_refresh_failed: ${redact((e as Error).message)}`);
     }
   }
 }

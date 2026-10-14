@@ -6,6 +6,11 @@ import type { Annotation, Chunk, FileRecord, Relation, SymbolRecord } from '../s
 
 type Row = Record<string, string | number | null>;
 
+export interface PendingChunk {
+  chunkId: string; fileId: string; relativePath: string; language: string; symbol: string; chunkType: string;
+  lineStart: number; lineEnd: number; contentHash: string; content: string; gitCommit: string; indexedAt: string; summary: string;
+}
+
 const toAnnotation = (r: Row): Annotation => ({
   relativePath: r.relative_path as string, summary: r.summary as string, role: r.role as string,
   contentHash: r.content_hash as string, author: r.author as string, updatedAt: r.updated_at as string,
@@ -28,6 +33,9 @@ export class Manifest {
     this.db = new DatabaseSync(file);
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = OFF;');
     this.db.exec(SCHEMA);
+    if (!this.all('PRAGMA table_info(chunks)').some((c) => c.name === 'content')) {
+      this.db.exec("ALTER TABLE chunks ADD COLUMN content TEXT NOT NULL DEFAULT ''");
+    }
   }
 
   close(): void { this.db.close(); }
@@ -103,8 +111,8 @@ export class Manifest {
     this.run('DELETE FROM chunks WHERE file_id=?', fileId);
     for (const c of chunks) {
       this.run(
-        'INSERT INTO chunks(chunk_id,file_id,line_start,line_end,symbol,chunk_type,content_hash,embedded) VALUES(?,?,?,?,?,?,?,?)',
-        c.chunkId, fileId, c.lineStart, c.lineEnd, c.symbol, c.chunkType, c.contentHash, embedded.has(c.chunkId) ? 1 : 0,
+        'INSERT INTO chunks(chunk_id,file_id,line_start,line_end,symbol,chunk_type,content_hash,embedded,content) VALUES(?,?,?,?,?,?,?,?,?)',
+        c.chunkId, fileId, c.lineStart, c.lineEnd, c.symbol, c.chunkType, c.contentHash, embedded.has(c.chunkId) ? 1 : 0, c.content,
       );
     }
   }
@@ -117,6 +125,26 @@ export class Manifest {
 
   markEmbedded(chunkIds: string[]): void {
     for (const id of chunkIds) this.run('UPDATE chunks SET embedded=1 WHERE chunk_id=?', id);
+  }
+
+  unembeddedChunks(limit: number): PendingChunk[] {
+    return this.all(
+      `SELECT c.chunk_id, c.file_id, c.symbol, c.chunk_type, c.line_start, c.line_end, c.content_hash, c.content,
+         f.relative_path, f.language, f.git_commit, f.indexed_at,
+         CASE WHEN a.content_hash=f.sha256 THEN a.summary ELSE '' END AS summary
+       FROM chunks c JOIN files f ON f.id=c.file_id LEFT JOIN annotations a ON a.relative_path=f.relative_path
+       WHERE c.embedded=0 ORDER BY c.rowid LIMIT ?`, limit,
+    ).map((r) => ({
+      chunkId: r.chunk_id as string, fileId: r.file_id as string, relativePath: r.relative_path as string,
+      language: r.language as string, symbol: r.symbol as string, chunkType: r.chunk_type as string,
+      lineStart: r.line_start as number, lineEnd: r.line_end as number, contentHash: r.content_hash as string,
+      content: r.content as string, gitCommit: r.git_commit as string, indexedAt: r.indexed_at as string,
+      summary: r.summary as string,
+    }));
+  }
+
+  markChunksEmbedded(chunkIds: string[]): void {
+    this.tx(() => this.markEmbedded(chunkIds));
   }
 
   replaceStructure(fileId: string, symbols: SymbolRecord[], imports: string[], exports: string[]): void {

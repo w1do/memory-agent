@@ -16,5 +16,5 @@ export function createEmbeddingProvider(config: MemoryConfig, env: EnvMap): Embe
   if (!apiKey && !isLocal) {
     return new NullEmbeddingProvider('EMBEDDING_API_KEY is not set (or use a local EMBEDDING_BASE_URL)', dimensions);
   }
-  return new OpenAICompatibleProvider({ baseUrl, apiKey, model, dimensions });
+  return new OpenAICompatibleProvider({ baseUrl, apiKey, model, dimensions, batchSize: config.embedBatchSize ?? 96 });
 }

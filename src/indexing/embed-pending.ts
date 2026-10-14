@@ -1,0 +1,46 @@
+import type { MemoryContext } from '../shared/context.js';
+import { redact } from '../security/redact.js';
+import type { PendingChunk } from '../storage/manifest.js';
+import { toPayload } from './file-indexer.js';
+
+export interface EmbedPendingOptions { batchSize: number; concurrency: number }
+export interface EmbedPendingResult { embedded: number; status: 'ok' | 'unavailable'; error: string }
+
+const textOf = (c: PendingChunk): string => `${c.relativePath}\n${c.symbol}\n${c.content}`.slice(0, 6000);
+
+/** Embeds all chunks with embedded = 0 in shared batches across files. A failure keeps them pending for the next sync. */
+export async function embedPending(ctx: MemoryContext, opts: EmbedPendingOptions): Promise<EmbedPendingResult> {
+  const { manifest, embeddings, qdrant, logger, config } = ctx;
+  const batchSize = Math.max(1, opts.batchSize);
+  const concurrency = Math.max(1, opts.concurrency);
+  let embedded = 0;
+  let collection: Promise<void> | undefined;
+  const ensure = (size: number): Promise<void> => {
+    if (!collection) collection = qdrant.ensureCollection(size);
+    return collection;
+  };
+
+  try {
+    for (;;) {
+      const round = manifest.unembeddedChunks(batchSize * concurrency);
+      if (!round.length) break;
+      const batches: PendingChunk[][] = [];
+      for (let i = 0; i < round.length; i += batchSize) batches.push(round.slice(i, i + batchSize));
+      await Promise.all(batches.map(async (batch) => {
+        const vectors = await embeddings.embedBatch(batch.map(textOf));
+        await ensure(vectors[0].length);
+        await qdrant.upsert(batch.map((c, i) => ({
+          chunkId: c.chunkId, vector: vectors[i],
+          payload: toPayload(config.projectId, { id: c.fileId, relativePath: c.relativePath, language: c.language, gitCommit: c.gitCommit, indexedAt: c.indexedAt }, c, c.summary),
+        })));
+        manifest.markChunksEmbedded(batch.map((c) => c.chunkId));
+        embedded += batch.length;
+      }));
+    }
+    return { embedded, status: 'ok', error: '' };
+  } catch (e) {
+    const error = redact((e as Error).message);
+    logger.warn(`semantic_search_unavailable: ${error}`);
+    return { embedded, status: 'unavailable', error };
+  }
+}

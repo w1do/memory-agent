@@ -36,6 +36,14 @@ EMBEDDING_DIMENSIONS=1536
 Без `EMBEDDING_API_KEY` поиск работает в **degraded lexical mode** (Typesense), CLI и MCP явно сообщают `semantic_search_unavailable`.
 Исключения по умолчанию (`.env*`, ключи, `node_modules`, …) плюс `.memoryignore` в корне проекта.
 
+`indexConcurrency` в `config.json` (по умолчанию 20) задаёт, сколько файлов индексируется параллельно. Прогресс сохраняется в манифесте (`last_index_path`) после каждой пачки: если индексация оборвалась, следующий `memory sync` продолжит с этого файла.
+
+Эмбеддинги считаются отдельным этапом после обхода файлов: чанки из всех файлов собираются в общие батчи. Настройки в `config.json` (необязательные):
+- `embedBatchSize` (по умолчанию 96) — число чанков в одном запросе к API эмбеддингов.
+- `embedConcurrency` (по умолчанию 2) — сколько запросов к API выполняется одновременно.
+
+Чанки, для которых эмбеддинги не получены (например, API недоступен), остаются в манифесте с `embedded = 0`; следующий `memory sync` доделает их.
+
 ## Команды
 
 Все команды запускаются из корня проекта. Опция `--path <dir>` (где поддерживается) указывает другой каталог проекта.
@@ -55,6 +63,7 @@ EMBEDDING_DIMENSIONS=1536
 | `memory search "<query>"` | Ищет по памяти проекта. По умолчанию выводит только уникальные пути найденных файлов и строку актуальной аннотации под путём (помечает `STALE`, если файл изменён после индексации). Опции: `--snippets` (диапазон строк, символ, score и фрагмент кода), `--mode hybrid\|lexical\|semantic`, `--limit <n>`, `--language <lang>`, `--max-chars <n>`, `--json`. |
 | `memory docs` | Пишет `.memory/generated/project-memory.md` строго по фактам индекса. |
 | `memory mcp --project <abs path>` | Запускает MCP-сервер по stdio. Требует абсолютный путь к проекту. |
+| `memory mcp install [--agents claude,junie,codex,opencode]` | Прописывает сервер `project-memory` в конфиги агентов внутри проекта: `.mcp.json` (Claude), `.junie/mcp/mcp.json` (Junie), `.codex/config.toml` (Codex), `opencode.json` (OpenCode). Без `--agents` в терминале показывается список с выбором номеров (Enter — все). Повторный запуск идемпотентен, чужие серверы не трогаются. |
 
 Примеры:
 
@@ -73,7 +82,11 @@ memory mcp --project /abs/path/to/my-project
 
 ## MCP
 
-`.memory/mcp.example.json` (пользовательские конфиги автоматически не меняются):
+Быстрая установка во все выбранные агенты проекта: `memory mcp install`.
+
+Глобальная установка (работает в любом проекте без `--project`): `memory mcp install --global`. Конфиги пользователя: `~/.claude.json` (Claude), `~/.junie/mcp/mcp.json` (Junie), `~/.codex/config.toml` (Codex), `~/.config/opencode/opencode.json` (OpenCode). Сервер определяет проект по текущему каталогу (корень git-репозитория); если проект не инициализирован, он сообщает `memory init`.
+
+Вручную — `.memory/mcp.example.json` (пользовательские конфиги автоматически не меняются):
 
 ```json
 { "mcpServers": { "project-memory": { "command": "memory", "args": ["mcp", "--project", "/abs/path/to/project"] } } }

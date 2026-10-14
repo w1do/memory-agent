@@ -1,9 +1,12 @@
+import { existsSync } from 'node:fs';
 import { withContext } from '../common.js';
 import { searchMemory } from '../../search/hybrid.js';
 import { generateDocs } from '../../docs/generate.js';
 import { runStdio } from '../../mcp/server.js';
 import { openContext } from '../../shared/context.js';
+import { configPath } from '../../project/config.js';
 import { rootFrom } from '../common.js';
+import { MemoryError } from '../../shared/errors.js';
 import type { SearchMode } from '../../shared/types.js';
 
 export interface SearchOptions { path?: string; mode?: SearchMode; limit?: string; language?: string; json?: boolean; maxChars?: string; snippets?: boolean }
@@ -37,6 +40,8 @@ export const searchCommand = (query: string, o: SearchOptions) => withContext(o.
 export const docsCommand = (o: { path?: string }) => withContext(o.path, async (ctx) => console.log(`Written ${generateDocs(ctx)}`));
 
 export async function mcpCommand(o: { project?: string }): Promise<void> {
-  const ctx = openContext(rootFrom(o.project), { quiet: true });
+  const root = rootFrom(o.project);
+  if (!existsSync(configPath(root))) throw new MemoryError(`Project memory is not initialized in ${root}: run "memory init" first`, 'not_initialized');
+  const ctx = openContext(root, { quiet: true });
   await runStdio(ctx);
 }

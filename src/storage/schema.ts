@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS files (
 CREATE TABLE IF NOT EXISTS chunks (
   chunk_id TEXT PRIMARY KEY, file_id TEXT NOT NULL, line_start INTEGER NOT NULL,
   line_end INTEGER NOT NULL, symbol TEXT NOT NULL, chunk_type TEXT NOT NULL,
-  content_hash TEXT NOT NULL, embedded INTEGER NOT NULL DEFAULT 0
+  content_hash TEXT NOT NULL, embedded INTEGER NOT NULL DEFAULT 0, content TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_file ON chunks(file_id);
 CREATE TABLE IF NOT EXISTS symbols (

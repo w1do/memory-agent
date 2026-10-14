@@ -15,6 +15,9 @@ export interface MemoryConfig {
   typesensePort: number;
   embedding: { baseUrl: string; model: string; dimensions: number };
   maxFileSize: number;
+  indexConcurrency?: number;
+  embedBatchSize?: number;
+  embedConcurrency?: number;
 }
 
 export const memoryDir = (root: string) => join(root, '.memory');

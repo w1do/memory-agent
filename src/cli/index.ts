@@ -6,6 +6,7 @@ import { startCommand, statusCommand, stopCommand } from './commands/lifecycle.j
 import { reindexCommand, syncCommand, watchCommand } from './commands/indexing.js';
 import { docsCommand, mcpCommand, searchCommand } from './commands/search.js';
 import { doctorCommand } from './commands/doctor.js';
+import { mcpInstallCommand } from './commands/mcp-install.js';
 
 const program = new Command('memory').description('Local project code memory for AI agents').version('0.1.0');
 const path = '--path <dir>';
@@ -29,8 +30,11 @@ program.command('reindex [paths...]').option(path)
   .description('Rebuild Qdrant and Typesense from source, or only the given paths')
   .action(act((paths: string[], o: { path?: string }) => reindexCommand(o, paths)));
 program.command('docs').option(path).description('Generate .memory/generated/project-memory.md').action(act(docsCommand));
-program.command('mcp').requiredOption('--project <dir>', 'absolute project path')
-  .description('Run MCP server over stdio').action(act(mcpCommand));
+const mcp = program.command('mcp').option('--project <dir>', 'absolute project path')
+  .description('Run MCP server over stdio (or install it into AI agents with "mcp install")').action(act(mcpCommand));
+mcp.command('install').option(path).option('--agents <list>', 'claude,junie,codex,opencode (default: interactive, all)')
+  .option('--global', 'install into user-level agent configs (works in any project, no --project)')
+  .description('Add project-memory MCP server to selected agents configs (project or --global)').action(act(mcpInstallCommand));
 program.command('search <query>').option(path).option('--mode <mode>', 'hybrid|lexical|semantic')
   .option('--limit <n>').option('--language <lang>').option('--max-chars <n>').option('--json')
   .option('--snippets', 'show symbols, scores and code snippets (default: paths only)')
