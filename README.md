@@ -151,11 +151,13 @@ memory doctor
 
 ```bash
 memory stop
+cp .memory/.env ~/project-memory.env.bak      # сохранить ключи (EMBEDDING_API_KEY, TYPESENSE_API_KEY)
 rm -rf .memory        # данные на Linux могут принадлежать контейнеру: sudo rm -rf
-# убрать строку .memory/ из .gitignore при необходимости
+# вернуть ключи до повторного init:
+mkdir -p .memory && cp ~/project-memory.env.bak .memory/.env
 ```
 
-Исходники проекта `memory` никогда не изменяет и не удаляет.
+Исходники проекта `memory` никогда не изменяет и не удаляет. Файл `.memory/.env` при `memory init` и повторной установке не перезаписывается: существующие значения сохраняются, отсутствующие ключи только дописываются.
 
 ## Разработка
 

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { basename, join } from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -84,16 +84,24 @@ export function readEnvFile(root: string): EnvMap {
   return out;
 }
 
-/** Creates .env only if missing; never overwrites existing values. */
+/** Creates .env if missing; otherwise keeps every existing line and only appends missing keys. */
 export function ensureEnvFile(root: string): void {
-  if (existsSync(envPath(root))) return;
   mkdirSync(memoryDir(root), { recursive: true });
-  const lines = [
-    `TYPESENSE_API_KEY=${randomBytes(24).toString('hex')}`,
-    'EMBEDDING_BASE_URL=',
-    'EMBEDDING_API_KEY=',
-    'EMBEDDING_MODEL=',
-    '',
+  const defaults: Array<[string, string]> = [
+    ['TYPESENSE_API_KEY', randomBytes(24).toString('hex')],
+    ['EMBEDDING_BASE_URL', ''],
+    ['EMBEDDING_API_KEY', ''],
+    ['EMBEDDING_MODEL', ''],
   ];
-  writeFileSync(envPath(root), lines.join('\n'), { mode: 0o600 });
+  if (!existsSync(envPath(root))) {
+    const lines = defaults.map(([key, value]) => `${key}=${value}`);
+    writeFileSync(envPath(root), lines.join('\n') + '\n', { mode: 0o600 });
+    return;
+  }
+  const present = readEnvFile(root);
+  const missing = defaults.filter(([key]) => !(key in present));
+  if (!missing.length) return;
+  const current = readFileSync(envPath(root), 'utf8');
+  const separator = current.length === 0 || current.endsWith('\n') ? '' : '\n';
+  appendFileSync(envPath(root), separator + missing.map(([key, value]) => `${key}=${value}`).join('\n') + '\n');
 }
