@@ -4,7 +4,7 @@
 
 - **Typesense** — быстрый полнотекстовый, path- и symbol-поиск.
 - **Qdrant** — семантический поиск по embeddings (Polza.AI, OpenAI-compatible).
-- **SQLite** (`.memory/index.db`) — канонический манифест: файлы, chunks, символы, связи и аннотации агента. Qdrant/Typesense — производные индексы, которые `memory reindex` обновляет без удаления.
+- **SQLite** (`~/.config/project-memory/index/<projectId>/index.db`) — кэш индекса: файлы, chunks, символы, связи. Его можно пересоздать через `memory reindex`. Аннотации агента хранятся в `.memory/annotations.json` внутри проекта и коммитятся. Qdrant/Typesense — производные индексы, которые `memory reindex` обновляет без удаления.
 - Имя коллекции = slug имени папки + хеш пути (например `my-app-3fa91c`).
 - Всё слушает только `127.0.0.1`, в Docker Compose.
 
@@ -31,7 +31,7 @@ memory search "где авторизация"
 
 ## Конфигурация
 
-`.memory/config.json` — порты, коллекция, лимиты. `.memory/.env` — секреты (в Git не попадает):
+`.memory/config.json` — `projectId`, коллекция, `schemaVersion`, лимиты. Секреты и настройки общие для всех проектов и лежат в `~/.config/project-memory/global.env` (права 600), который создаётся при `memory service up`:
 
 ```dotenv
 TYPESENSE_API_KEY=...        # генерируется автоматически
@@ -40,6 +40,8 @@ EMBEDDING_API_KEY=           # ключ Polza.AI
 EMBEDDING_MODEL=openai/text-embedding-3-small
 EMBEDDING_DIMENSIONS=1536
 ```
+
+Файл `.memory/.env` необязателен: его значения переопределяют глобальные, только если они не пустые.
 
 Без `EMBEDDING_API_KEY` поиск работает в **degraded lexical mode** (Typesense), CLI и MCP явно сообщают `semantic_search_unavailable`.
 Исключения по умолчанию (`.env*`, ключи, `node_modules`, …) плюс `.memoryignore` в корне проекта.
@@ -58,9 +60,10 @@ EMBEDDING_DIMENSIONS=1536
 
 | Команда | Что делает |
 | --- | --- |
-| `memory init` | Создаёт `.memory/` и `.memoryignore`, поднимает Qdrant и Typesense, создаёт коллекции, индексирует проект, делает тестовый поиск и пишет `.memory/mcp.example.json`. |
-| `memory start` | Запускает Qdrant и Typesense через Docker Compose (данные сохраняются). |
-| `memory stop` | Останавливает контейнеры. Данные в `.memory/data/` не удаляются. |
+| `memory service up` | Один раз на машину: поднимает общие Qdrant и Typesense (идемпотентно), создаёт `global.env`. |
+| `memory service down\|status\|logs` | Останавливает, показывает состояние или логи общего стека. Данные сохраняются. |
+| `memory init` | Создаёт `.memory/config.json`, `.memoryignore`, `mcp.example.json`, коллекцию в общем сервисе и индексирует проект. Docker в проекте не запускается; если сервис не запущен, команда подскажет `memory service up`. |
+| `memory migrate` | Переносит старый проект со своим Docker на общий сервис (бэкап `.memory.bak-<дата>`, переиндексация). Флаги: `--scan <dir> [--apply]`, `--all`, `--cleanup`, `--rollback`. |
 | `memory status [--json]` | Показывает состояние сервисов, число файлов и chunks, ошибки, дату последней синхронизации и число устаревших файлов. |
 | `memory doctor` | Диагностирует Docker, Qdrant, Typesense, embeddings и манифест и показывает реальный режим поиска. |
 | `memory index` | Индексирует новые и изменённые файлы. |
@@ -119,17 +122,19 @@ memory mcp --project /abs/path/to/my-project
 
 ## Проверка индекса вручную
 
-Порты и имя коллекции лежат в `.memory/config.json` (поля `qdrantPort`, `typesensePort`, `collection`). Ключ Typesense — в `.memory/.env` (`TYPESENSE_API_KEY`). Все проверки читают данные и ничего не меняют.
+Имя коллекции лежит в `.memory/config.json` (поле `collection`). Порты и ключ Typesense (`TYPESENSE_API_KEY`) общие и берутся из `~/.config/project-memory/global.env`. Все проверки читают данные и ничего не меняют.
 
-### SQLite (`.memory/index.db`) — канонический манифест
+### SQLite (кэш индекса в `~/.config/project-memory/index/<projectId>/index.db`)
+
+Путь к файлу зависит от `projectId` из `.memory/config.json`. Аннотации смотрите в `.memory/annotations.json`.
 
 ```bash
-sqlite3 .memory/index.db "SELECT COUNT(*) AS files FROM files;"
-sqlite3 .memory/index.db "SELECT relative_path, size, language, indexed_at FROM files ORDER BY relative_path;"
-sqlite3 .memory/index.db "SELECT COUNT(*) AS chunks FROM chunks;"
-sqlite3 .memory/index.db "SELECT path, message, at FROM index_errors ORDER BY at DESC LIMIT 20;"
-sqlite3 .memory/index.db "SELECT relative_path, role, summary, author, updated_at FROM annotations ORDER BY relative_path;"
-sqlite3 .memory/index.db "SELECT relative_path FROM files WHERE relative_path LIKE 'node_modules/%' OR relative_path LIKE '%.lock' OR relative_path LIKE '%.env%';"
+DB=~/.config/project-memory/index/$(grep -o '"projectId": *"[^"]*"' .memory/config.json | cut -d'"' -f4)/index.db
+sqlite3 "$DB" "SELECT COUNT(*) AS files FROM files;"
+sqlite3 "$DB" "SELECT relative_path, size, language, indexed_at FROM files ORDER BY relative_path;"
+sqlite3 "$DB" "SELECT COUNT(*) AS chunks FROM chunks;"
+sqlite3 "$DB" "SELECT path, message, at FROM index_errors ORDER BY at DESC LIMIT 20;"
+sqlite3 "$DB" "SELECT relative_path FROM files WHERE relative_path LIKE 'node_modules/%' OR relative_path LIKE '%.lock' OR relative_path LIKE '%.env%';"
 ```
 
 Последний запрос должен вернуть пустой результат: мусор и секреты в индекс попадать не должны. Если `sqlite3` не установлен, используйте `apt install sqlite3` или `brew install sqlite`.
@@ -165,22 +170,19 @@ memory doctor
 ## Troubleshooting
 
 - `memory doctor` — реальное состояние Docker, Qdrant, Typesense, embeddings, манифеста.
-- Контейнер unhealthy: `docker compose -f .memory/docker-compose.yml logs`.
-- Порт занят: поменяйте `qdrantPort`/`typesensePort` в `config.json`, затем `memory init`.
+- Общий стек не отвечает: `memory service status`, затем `memory service logs`. Если порт 6333 или 8108 занят, поменяйте `QDRANT_PORT`/`TYPESENSE_PORT` в `global.env` и повторите `memory service up`.
+- Контейнер unhealthy: `memory service logs`.
 - Индекс расходится: `memory reindex` (перечитывает файлы и обновляет индексы без удаления).
 - Смена модели embeddings или размерности: текущий `memory reindex` не пересчитывает векторы уже проиндексированных chunks. Полного пересчёта пока нет.
+- Старый проект с `.memory/docker-compose.yml`: `memory migrate`, затем `memory doctor`.
 
 ## Rollback
 
-```bash
-memory stop
-cp .memory/.env ~/project-memory.env.bak      # сохранить ключи (EMBEDDING_API_KEY, TYPESENSE_API_KEY)
-rm -rf .memory        # данные на Linux могут принадлежать контейнеру: sudo rm -rf
-# вернуть ключи до повторного init:
-mkdir -p .memory && cp ~/project-memory.env.bak .memory/.env
-```
+Общий сервис: `memory service down` (данные сохраняются). Ключи в `~/.config/project-memory/global.env` не удаляются.
 
-Исходники проекта `memory` никогда не изменяет и не удаляет. Файл `.memory/.env` при `memory init` и повторной установке не перезаписывается: существующие значения сохраняются, отсутствующие ключи только дописываются.
+Миграция проекта: `memory migrate --rollback` восстанавливает `.memory` из самого нового `.memory.bak-<дата>` и поднимает старый compose. Откат не возвращает `data`, если была выполнена `memory migrate --cleanup`.
+
+Исходники проекта `memory` никогда не изменяет и не удаляет.
 
 ## Разработка
 

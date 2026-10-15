@@ -134,13 +134,13 @@ function ensureMemoryIgnore(root: string): void {
   if (!existsSync(file)) writeFileSync(file, DEFAULT_MEMORYIGNORE);
 }
 
-function ensureRootGitignore(root: string): void {
+/** Idempotent: drops a whole-directory `.memory/` rule (it would hide annotations.json) and keeps only the annotations exception. */
+export function ensureRootGitignore(root: string): void {
   const file = join(root, '.gitignore');
   const current = existsSync(file) ? readFileSync(file, 'utf8') : '';
-  const legacy = ['.memory', '.memory/', '/.memory', '/.memory/'];
-  let lines = current.split(/\r?\n/);
-  if (lines.some((l) => l.trim() === '!.memory/annotations.json')) return;
-  lines = lines.filter((l) => !legacy.includes(l.trim()));
+  const managed = ['.memory', '.memory/', '/.memory', '/.memory/', '.memory/*', '/.memory/*', '!.memory/annotations.json'];
+  const lines = current.split(/\r?\n/).filter((l) => !managed.includes(l.trim()));
   while (lines.length && lines[lines.length - 1] === '') lines.pop();
-  writeFileSync(file, [...lines, '.memory/*', '!.memory/annotations.json'].join('\n') + '\n');
+  const next = [...lines, '.memory/*', '!.memory/annotations.json'].join('\n') + '\n';
+  if (next !== current) writeFileSync(file, next);
 }

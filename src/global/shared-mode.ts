@@ -21,9 +21,14 @@ export function mergeEnv(project: EnvMap): EnvMap {
 
 export async function assertSharedServiceUp(): Promise<void> {
   const { qdrant } = sharedPorts();
+  let detail = '';
   try {
-    const res = await fetch(`http://127.0.0.1:${qdrant}/healthz`, { signal: AbortSignal.timeout(3000) });
+    const res = await fetch(`http://127.0.0.1:${qdrant}/healthz`, { signal: AbortSignal.timeout(5000) });
     if (res.ok) return;
-  } catch { /* fall through */ }
-  throw new MemoryError('Shared service is not running. Run "memory service up" once, then retry.', 'service_down');
+    detail = `HTTP ${res.status}`;
+  } catch (e) {
+    const err = e as Error & { cause?: { code?: string; message?: string } };
+    detail = err.cause?.code ?? err.cause?.message ?? err.message;
+  }
+  throw new MemoryError(`Shared service is not reachable at 127.0.0.1:${qdrant} (${detail}). Run "memory service up" once, then retry.`, 'service_down');
 }

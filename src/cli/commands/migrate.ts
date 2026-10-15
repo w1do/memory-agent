@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import { rootFrom } from '../common.js';
-import { migrateProject, rollbackProject, scanLegacy } from '../../global/migrate.js';
+import { cleanupLeftovers, migrateProject, rollbackProject, scanLegacy } from '../../global/migrate.js';
 import { listProjects } from '../../global/registry.js';
 import { isLegacyProject } from '../../global/shared-mode.js';
 
@@ -21,9 +21,13 @@ export async function migrateCommand(o: MigrateOptions): Promise<void> {
   }
   const results = [];
   for (const root of roots) {
-    const r = await migrateProject(root, { cleanup: o.cleanup });
+    const r = await migrateProject(root);
     console.log(`${r.status.padEnd(8)} ${r.root}  ${r.detail}`);
     results.push(r);
+    if (o.cleanup && r.status !== 'error' && !isLegacyProject(root)) {
+      const removed = cleanupLeftovers(root);
+      console.log(removed.length ? `cleaned  ${root}  removed ${removed.map((p) => p.slice(root.length + 1)).join(', ')}` : `cleaned  ${root}  nothing to remove`);
+    }
   }
   if (results.some((r) => r.status === 'error')) process.exitCode = 1;
 }

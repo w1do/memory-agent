@@ -1,11 +1,12 @@
 import { cpSync, existsSync, statSync, readdirSync, renameSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { loadConfig, memoryDir, readEnvFile, saveConfig, envPath } from '../project/config.js';
+import { configPath, loadConfig, memoryDir, readEnvFile, saveConfig, envPath } from '../project/config.js';
 import { startServices, stopServices } from '../cli/docker.js';
 import { openContext } from '../shared/context.js';
 import { syncProject } from '../indexing/sync.js';
+import { scaffold } from '../cli/scaffold.js';
 import { ensureGlobalEnv } from './env.js';
-import { globalEnvPath } from './paths.js';
+import { globalEnvPath, indexDbPath } from './paths.js';
 import { registerProject } from './registry.js';
 import { assertSharedServiceUp, isLegacyProject, sharedPorts } from './shared-mode.js';
 
@@ -15,7 +16,7 @@ export interface MigrateResult { root: string; status: MigrateStatus; detail: st
 const COMPOSE = 'docker-compose.yml';
 
 /** Moves one legacy project to the shared service. Idempotent: a migrated project is skipped. */
-export async function migrateProject(root: string, opts: { cleanup?: boolean } = {}): Promise<MigrateResult> {
+export async function migrateProject(root: string): Promise<MigrateResult> {
   if (!isLegacyProject(root)) return { root, status: 'skipped', detail: 'already on shared service' };
   try {
     await assertSharedServiceUp();
@@ -39,17 +40,36 @@ export async function migrateProject(root: string, opts: { cleanup?: boolean } =
     saveConfig({ ...loadConfig(root), qdrantPort: ports.qdrant, typesensePort: ports.typesense });
     if (existsSync(envPath(root))) rmSync(envPath(root));
     renameSync(join(dir, COMPOSE), join(dir, `${COMPOSE}.old`));
+    await scaffold(root);
     const ctx = openContext(root, { quiet: true });
     try {
       await ctx.typesense.ensureCollection();
       await syncProject(ctx, { kind: 'reindex', force: ctx.manifest.listFiles().map((f) => f.relativePath) });
     } finally { ctx.close(); }
-    if (opts.cleanup) { rmSync(join(dir, 'data'), { recursive: true, force: true }); rmSync(join(dir, `${COMPOSE}.old`), { force: true }); }
     registerProject(root);
     return { root, status: 'migrated', detail: `backup ${backup}` };
   } catch (e) {
     return { root, status: 'error', detail: e instanceof Error ? e.message : String(e) };
   }
+}
+
+/**
+ * Removes leftovers of the old layout from a project already on the shared service.
+ * The local index.db* is removed only when the global index exists, so no data is lost.
+ */
+export function cleanupLeftovers(root: string): string[] {
+  const dir = memoryDir(root);
+  const cfg = existsSync(configPath(root)) ? loadConfig(root) : undefined;
+  const globalIndex = cfg !== undefined && existsSync(indexDbPath(cfg.projectId));
+  const targets = ['data', `${COMPOSE}.old`, '.env.example', ...(globalIndex ? ['index.db', 'index.db-wal', 'index.db-shm'] : [])];
+  const removed: string[] = [];
+  for (const t of targets) {
+    const p = join(dir, t);
+    if (!existsSync(p)) continue;
+    rmSync(p, { recursive: true, force: true });
+    removed.push(p);
+  }
+  return removed;
 }
 
 /** Finds directories that contain a legacy .memory under base (skips node_modules and dot dirs). */
