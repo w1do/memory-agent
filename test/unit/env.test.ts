@@ -42,7 +42,9 @@ describe('.env preservation', () => {
     expect(readEnvFile(root).TYPESENSE_API_KEY).toMatch(/^[0-9a-f]{48}$/);
   });
 
-  it('keeps the same .env across repeated scaffold runs', async () => {
+  it('keeps the same .env across repeated scaffold runs (legacy project)', async () => {
+    mkdirSync(join(root, '.memory'), { recursive: true });
+    writeFileSync(join(root, '.memory', 'docker-compose.yml'), 'name: legacy\n');
     await scaffold(root);
     writeFileSync(envPath(root), readFileSync(envPath(root), 'utf8').replace('EMBEDDING_API_KEY=', 'EMBEDDING_API_KEY=polza-secret'));
     const before = readFileSync(envPath(root), 'utf8');

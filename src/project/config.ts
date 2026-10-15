@@ -48,7 +48,7 @@ export async function freePort(preferred: number): Promise<number> {
   }
 }
 
-export async function createDefaultConfig(root: string): Promise<MemoryConfig> {
+export async function createDefaultConfig(root: string, ports?: { qdrant: number; typesense: number }): Promise<MemoryConfig> {
   const name = collectionName(root);
   return {
     projectId: name,
@@ -56,8 +56,8 @@ export async function createDefaultConfig(root: string): Promise<MemoryConfig> {
     root,
     collection: name,
     host: '127.0.0.1',
-    qdrantPort: await freePort(6333),
-    typesensePort: await freePort(8108),
+    qdrantPort: ports?.qdrant ?? await freePort(6333),
+    typesensePort: ports?.typesense ?? await freePort(8108),
     embedding: { baseUrl: 'https://polza.ai/api/v1', model: 'openai/text-embedding-3-small', dimensions: 1536 },
     maxFileSize: 512 * 1024,
   };

@@ -13,11 +13,19 @@
 ```bash
 npm install -g project-memory
 cd my-project
-memory init          # .memory/, docker compose, индексация, тестовый поиск, MCP-пример
+memory service up    # один р��з на машину: общие Qdrant + Typesense, ключи в ~/.config/project-memory/global.env
+memory init          # в каждом проекте: .memory/config.json, коллекции, индексация (без Docker)
 memory search "где авторизация"
 ```
 
 Требуется Node.js ≥ 22.13 и Docker с Compose v2. Образы: `qdrant/qdrant:v1.19.2`, `typesense/typesense:30.2`.
+
+### Общий сервис
+
+- `memory service up|down|status|logs` управляет одним стеком для всех проектов (порты только на `127.0.0.1`). Настройки и ключи (`TYPESENSE_API_KEY`, `EMBEDDING_*`) лежат в `~/.config/project-memory/global.env` (права 600); каталог можно сменить через `PROJECT_MEMORY_HOME`.
+- Кэш индекса `index.db` хранится в `~/.config/project-memory/index/<projectId>/`. В проекте остаются `config.json`, `.ignore`, `annotations.json` (коммитится) и необязательный `.env`.
+- `memory mcp` — один процесс для всех проектов: проект берётся из текущего каталога или параметра `project`.
+- Старые проекты с собственным Docker: `memory migrate` (один проект), `--scan <dir> [--apply]`, `--all` (по реестру `projects.json`), `--cleanup`, `--rollback`. Перед переносом делается бэкап `.memory.bak-<дата>`.
 
 Флаги `init`: `--path <dir>`, `--no-start`, `--no-index`, `--yes`. Повторный `init` идемпотентен: данные и `.env` не трогаются, неизменённые файлы не переиндексируются.
 

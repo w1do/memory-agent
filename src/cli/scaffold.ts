@@ -2,20 +2,27 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } fr
 import { join } from 'node:path';
 import { createDefaultConfig, ensureEnvFile, configPath, loadConfig, memoryDir, saveConfig, type MemoryConfig } from '../project/config.js';
 import { renderCompose } from './compose.js';
+import { registerProject } from '../global/registry.js';
+import { isLegacyProject, sharedPorts } from '../global/shared-mode.js';
 
 /** Idempotent: existing config, .env, data and ignore rules are preserved. */
 export async function scaffold(root: string): Promise<MemoryConfig> {
   const dir = memoryDir(root);
-  for (const sub of ['data/qdrant', 'data/typesense', 'logs', 'generated']) mkdirSync(join(dir, sub), { recursive: true });
-  const config = existsSync(configPath(root)) ? loadConfig(root) : await createDefaultConfig(root);
+  const legacy = isLegacyProject(root);
+  const subs = legacy ? ['data/qdrant', 'data/typesense', 'logs', 'generated'] : ['logs', 'generated'];
+  for (const sub of subs) mkdirSync(join(dir, sub), { recursive: true });
+  const config = existsSync(configPath(root)) ? loadConfig(root) : await createDefaultConfig(root, legacy ? undefined : sharedPorts());
   saveConfig(config);
-  ensureEnvFile(root);
-  const user = typeof process.getuid === 'function' ? `${process.getuid()}:${process.getgid?.()}` : undefined;
-  writeFileSync(join(dir, 'docker-compose.yml'), renderCompose(config, user));
-  writeFileSync(join(dir, '.gitignore'), '*\n!.gitignore\n!mcp.example.json\n');
+  if (legacy) {
+    ensureEnvFile(root);
+    const user = typeof process.getuid === 'function' ? `${process.getuid()}:${process.getgid?.()}` : undefined;
+    writeFileSync(join(dir, 'docker-compose.yml'), renderCompose(config, user));
+  }
+  writeFileSync(join(dir, '.gitignore'), '*\n!.gitignore\n!mcp.example.json\n!annotations.json\n');
   writeFileSync(join(dir, 'mcp.example.json'), JSON.stringify(mcpExample(root), null, 2) + '\n');
   ensureRootGitignore(root);
   ensureMemoryIgnore(root);
+  registerProject(root);
   return config;
 }
 
@@ -130,7 +137,10 @@ function ensureMemoryIgnore(root: string): void {
 function ensureRootGitignore(root: string): void {
   const file = join(root, '.gitignore');
   const current = existsSync(file) ? readFileSync(file, 'utf8') : '';
-  if (current.split(/\r?\n/).some((l) => ['.memory', '.memory/', '/.memory', '/.memory/'].includes(l.trim()))) return;
-  const prefix = current && !current.endsWith('\n') ? '\n' : '';
-  appendFileSync(file, `${prefix}.memory/\n`);
+  const legacy = ['.memory', '.memory/', '/.memory', '/.memory/'];
+  let lines = current.split(/\r?\n/);
+  if (lines.some((l) => l.trim() === '!.memory/annotations.json')) return;
+  lines = lines.filter((l) => !legacy.includes(l.trim()));
+  while (lines.length && lines[lines.length - 1] === '') lines.pop();
+  writeFileSync(file, [...lines, '.memory/*', '!.memory/annotations.json'].join('\n') + '\n');
 }

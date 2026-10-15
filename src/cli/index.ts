@@ -7,6 +7,8 @@ import { reindexCommand, syncCommand, watchCommand } from './commands/indexing.j
 import { docsCommand, mcpCommand, searchCommand } from './commands/search.js';
 import { doctorCommand } from './commands/doctor.js';
 import { mcpInstallCommand } from './commands/mcp-install.js';
+import { migrateCommand } from './commands/migrate.js';
+import { serviceDownCommand, serviceLogsCommand, serviceStatusCommand, serviceUpCommand } from './commands/service.js';
 
 const program = new Command('memory').description('Local project code memory for AI agents').version('0.1.0');
 const path = '--path <dir>';
@@ -14,6 +16,18 @@ const path = '--path <dir>';
 const act = <A extends unknown[]>(fn: (...a: A) => unknown) => async (...a: A): Promise<void> => {
   try { await fn(...a); } catch (e) { handleError(e); }
 };
+
+const service = program.command('service').description('Manage the shared Qdrant + Typesense stack for all projects');
+service.command('up').description('Start shared Qdrant and Typesense once (idempotent)').action(act(serviceUpCommand));
+service.command('down').description('Stop shared services (data is kept)').action(act(serviceDownCommand));
+service.command('status').description('Show shared service state').action(act(serviceStatusCommand));
+service.command('logs').option('--tail <n>', 'number of lines').description('Show shared service logs').action(act(serviceLogsCommand));
+
+program.command('migrate').description('Move a legacy per-project .memory to the shared service')
+  .option(path, 'project directory').option('--scan <dir>', 'find legacy projects under a directory (dry run)')
+  .option('--all', 'migrate every legacy project from the registry').option('--rollback', 'restore the latest .memory.bak-*')
+  .option('--apply', 'migrate the projects found by --scan').option('--cleanup', 'delete old compose and data after success')
+  .action(act(migrateCommand));
 
 program.command('init').description('Create .memory/, start services, index the project')
   .option(path, 'project directory').option('--no-start', 'do not start Docker services')

@@ -74,7 +74,7 @@ describe('memory mcp command', () => {
     const dir = mkdtempSync(join(tmpdir(), 'mcp-uninit-'));
     vi.spyOn(process, 'cwd').mockReturnValue(dir);
     try {
-      await expect(mcpCommand({})).rejects.toThrow(/not initialized/);
+      await expect(mcpCommand({ project: dir })).rejects.toThrow(/not initialized/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
