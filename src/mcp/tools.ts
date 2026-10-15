@@ -15,6 +15,7 @@ import { resolveInside } from '../project/paths.js';
 import { hasForbiddenExtension } from '../security/policy.js';
 import { redact } from '../security/redact.js';
 import { MemoryError } from '../shared/errors.js';
+import type { ContextResolver } from './projects.js';
 
 export const ANNOTATION_MAX_LENGTH = 200;
 export const ANNOTATION_ROLES = ['module', 'entry', 'test', 'config', 'doc', 'other'] as const;
@@ -51,16 +52,18 @@ export function annotateFile(ctx: MemoryContext, input: AnnotateInput) {
   return { path: rel, role: input.role, content_hash: file.sha256, saved: true };
 }
 
+const project = { project: z.string().optional().describe('Project directory; default: project of the current working directory') };
 const budget = {
   token_budget: z.number().int().positive().max(20000).optional().describe('Approximate token limit for the response'),
   max_chars: z.number().int().positive().max(80000).optional().describe('Hard character limit for the response'),
 };
 
 /** Registers all MCP tools. None of them modifies project source files. */
-export function registerTools(server: McpServer, ctx: MemoryContext): void {
+export function registerTools(server: McpServer, resolve: ContextResolver): void {
   server.registerTool('memory_search', {
     description: 'Search project memory (hybrid lexical + semantic). Returns compact hits, never whole files.',
     inputSchema: {
+      ...project,
       query: z.string().min(1),
       mode: z.enum(['hybrid', 'lexical', 'semantic']).optional(),
       limit: z.number().int().min(1).max(10).optional(),
@@ -69,56 +72,65 @@ export function registerTools(server: McpServer, ctx: MemoryContext): void {
       include_snippets: z.boolean().optional(),
       ...budget,
     },
-  }, safe((a) => searchMemory(ctx, a)));
+  }, safe((a) => searchMemory(resolve(a.project), a)));
 
   server.registerTool('memory_get_context', {
     description: 'Compact task context: files, modules, symbols, relations, snippets, index status and hashes.',
-    inputSchema: { query: z.string().min(1), ...budget },
-  }, safe((a) => buildContext(ctx, a.query, a)));
+    inputSchema: {
+      ...project, query: z.string().min(1), ...budget },
+  }, safe((a) => buildContext(resolve(a.project), a.query, a)));
 
   server.registerTool('memory_get_file', {
     description: 'Read one file or a line range (max 500 lines). Excluded/secret files are refused.',
-    inputSchema: { path: z.string(), line_start: z.number().int().min(1).optional(), line_end: z.number().int().min(1).optional() },
-  }, safe((a) => readFileSlice(ctx, a.path, a.line_start, a.line_end)));
+    inputSchema: {
+      ...project, path: z.string(), line_start: z.number().int().min(1).optional(), line_end: z.number().int().min(1).optional() },
+  }, safe((a) => readFileSlice(resolve(a.project), a.path, a.line_start, a.line_end)));
 
   server.registerTool('memory_related', {
     description: 'Files related to a path via imports, tests, docs, packages and shared module.',
-    inputSchema: { path: z.string(), depth: z.number().int().min(1).max(3).optional(), limit: z.number().int().min(1).max(100).optional() },
-  }, safe((a) => ({ path: a.path, related: relatedFiles(ctx, a.path, a.depth ?? 1, a.limit ?? 30) })));
+    inputSchema: {
+      ...project, path: z.string(), depth: z.number().int().min(1).max(3).optional(), limit: z.number().int().min(1).max(100).optional() },
+  }, safe((a) => ({ path: a.path, related: relatedFiles(resolve(a.project), a.path, a.depth ?? 1, a.limit ?? 30) })));
 
   server.registerTool('memory_update', {
     description: 'Re-index only the given project files after you changed them. Paths must be inside the project.',
-    inputSchema: { paths: z.array(z.string()).min(1).max(100), reason: z.string().optional() },
+    inputSchema: {
+      ...project, paths: z.array(z.string()).min(1).max(100), reason: z.string().optional() },
   }, safe(async (a) => {
+    const ctx = resolve(a.project);
     ctx.logger.info(`memory_update: ${a.paths.length} path(s)${a.reason ? ` — ${a.reason}` : ''}`);
     return { results: await updatePaths(ctx, a.paths) };
   }));
 
   server.registerTool('memory_sync', {
     description: 'Synchronise the whole project; unchanged files are not re-read.',
-    inputSchema: {},
-  }, safe(async () => {
-    const r = await syncProject(ctx);
+    inputSchema: {
+      ...project },
+  }, safe(async (a) => {
+    const r = await syncProject(resolve(a.project));
     return { added: r.added.length, changed: r.changed.length, renamed: r.renamed.length, removed: r.removed.length, unchanged: r.unchanged, errors: r.errors, semantic: r.semantic };
   }));
 
   server.registerTool('memory_annotate', {
     description: 'Save a short agent-written summary (max 200 chars) for an indexed file. Requires the current content_hash of the file.',
     inputSchema: {
+      ...project,
       path: z.string().min(1),
       summary: z.string().min(1).max(ANNOTATION_MAX_LENGTH),
       role: z.enum(ANNOTATION_ROLES),
       content_hash: z.string().min(1),
     },
-  }, safe((a) => annotateFile(ctx, a)));
+  }, safe((a) => annotateFile(resolve(a.project), a)));
 
   server.registerTool('memory_status', {
     description: 'State of Qdrant, Typesense, embeddings, counts, last sync, stale files and search mode.',
-    inputSchema: {},
-  }, safe(() => getStatus(ctx)));
+    inputSchema: {
+      ...project },
+  }, safe((a) => getStatus(resolve(a.project))));
 
   server.registerTool('memory_project_structure', {
     description: 'Compact project tree (no file contents).',
-    inputSchema: { depth: z.number().int().min(1).max(6).optional() },
-  }, safe((a) => ({ tree: projectStructure(ctx, a.depth ?? 3), stale: [...checkFreshness(ctx).stale].slice(0, 20) })));
+    inputSchema: {
+      ...project, depth: z.number().int().min(1).max(6).optional() },
+  }, safe((a) => ({ tree: projectStructure(resolve(a.project), a.depth ?? 3), stale: [...checkFreshness(resolve(a.project)).stale].slice(0, 20) })));
 }
