@@ -8,6 +8,8 @@ export interface OpenAIOptions {
   dimensions: number;
   batchSize?: number;
   timeoutMs?: number;
+  /** Send `dimensions` in the request (local servers such as Ollama need it to truncate). */
+  sendDimensions?: boolean;
 }
 
 /**
@@ -51,7 +53,7 @@ export class OpenAICompatibleProvider implements EmbeddingProvider {
         'content-type': 'application/json',
         ...(this.opts.apiKey ? { authorization: `Bearer ${this.opts.apiKey}` } : {}),
       },
-      body: JSON.stringify({ model: this.opts.model, input }),
+      body: JSON.stringify({ model: this.opts.model, input, ...(this.opts.sendDimensions ? { dimensions: this.opts.dimensions } : {}) }),
       signal: AbortSignal.timeout(this.opts.timeoutMs ?? 30_000),
     });
     if (!res.ok) throw new Error(`embedding endpoint returned HTTP ${res.status}`);
