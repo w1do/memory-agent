@@ -5,6 +5,7 @@ import { isIndexable } from '../project/scan.js';
 import { redact } from '../security/redact.js';
 import { FileIndexer } from './file-indexer.js';
 import { rebuildRelations } from './rebuild-relations.js';
+import { withWriter } from './writer.js';
 
 export interface UpdateResult {
   path: string;
@@ -15,6 +16,11 @@ export interface UpdateResult {
 
 /** Re-reads only the given paths. Throws PathOutsideProjectError for paths escaping the root. */
 export async function updatePaths(ctx: MemoryContext, paths: string[]): Promise<UpdateResult[]> {
+  return withWriter(ctx, 'update', () => runUpdate(ctx, paths),
+    (results) => results.filter((r) => r.status === 'error').map((r) => `${r.path}: ${r.reason}`).join('\n'));
+}
+
+async function runUpdate(ctx: MemoryContext, paths: string[]): Promise<UpdateResult[]> {
   const targets = paths.map((p) => resolveInside(ctx.root, p));
   await ctx.typesense.ensureCollection();
   const indexer = new FileIndexer(ctx);

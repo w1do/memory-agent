@@ -8,7 +8,7 @@ export interface ServiceStatus { ok: boolean; detail: string; count?: number }
 export interface MemoryStatus {
   project: string; collection: string; root: string;
   qdrant: ServiceStatus; typesense: ServiceStatus; embeddings: ServiceStatus;
-  files: number; chunks: number; errors: number; last_sync_at: string | null;
+  files: number; chunks: number; errors: number; pending_embeddings: number; last_sync_at: string | null;
   stale_files: number; unindexed_files: number; search_mode: 'hybrid' | 'degraded_lexical' | 'unavailable';
   last_path: { indexing: string | null; embedding: string | null };
 }
@@ -29,7 +29,7 @@ export async function getStatus(ctx: MemoryContext, opts: { checkEmbeddings?: bo
   const fresh = checkFreshness(ctx);
   return {
     project: ctx.config.projectName, collection: ctx.config.collection, root: ctx.root,
-    qdrant, typesense, embeddings, ...counts,
+    qdrant, typesense, embeddings, ...counts, pending_embeddings: ctx.manifest.pendingEmbeddings(),
     last_sync_at: ctx.manifest.getMeta('last_sync_at') ?? null,
     stale_files: fresh.stale.size, unindexed_files: fresh.added.length,
     search_mode: !typesense.ok ? 'unavailable' : qdrant.ok && embeddings.ok ? 'hybrid' : 'degraded_lexical',

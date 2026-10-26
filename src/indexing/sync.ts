@@ -8,8 +8,10 @@ import { FileIndexer } from './file-indexer.js';
 import type { FileRecord } from '../shared/types.js';
 import { rebuildRelations } from './rebuild-relations.js';
 import { embedPending } from './embed-pending.js';
+import { withWriter, type Progress } from './writer.js';
 
 export const CHECKPOINT_KEY = 'last_index_path';
+const RELATIONS_PENDING_KEY = 'relations_rebuild_pending';
 const DEFAULT_CONCURRENCY = 20;
 const DEFAULT_EMBED_BATCH = 96;
 const DEFAULT_EMBED_CONCURRENCY = 2;
@@ -63,11 +65,21 @@ async function removeFile(ctx: MemoryContext, file: FileRecord): Promise<void> {
   ctx.manifest.deleteFile(file.id);
 }
 
-export async function syncProject(ctx: MemoryContext, opts: { force?: string[]; kind?: string } = {}): Promise<SyncReport> {
+export interface SyncOptions { force?: string[]; kind?: string; mode?: 'structural' | 'full'; jobId?: string }
+
+export async function syncProject(ctx: MemoryContext, opts: SyncOptions = {}): Promise<SyncReport> {
+  return withWriter(ctx, opts.kind === 'init' ? 'init' : 'sync', (progress) => runSync(ctx, opts, progress),
+    (r) => r.errors.map((e) => `${e.path}: ${e.message}`).join('\n') || r.semanticError, opts.jobId);
+}
+
+async function runSync(ctx: MemoryContext, opts: SyncOptions, progress: Progress): Promise<SyncReport> {
   const { manifest } = ctx;
+  progress({ stage: 'scanning', processed: 0, total: 0 });
   await ctx.typesense.ensureCollection();
   const force = new Set(opts.force ?? []);
+  for (const error of manifest.errors(Number.MAX_SAFE_INTEGER)) force.add(error.path);
   const changes = detectChanges(ctx, force);
+  if (changes.added.length || changes.removed.length) manifest.setMeta(RELATIONS_PENDING_KEY, '1');
   const runId = manifest.startRun(opts.kind ?? 'sync');
   const report: SyncReport = {
     added: changes.added.map((f) => f.relativePath), changed: changes.changed.map((f) => f.relativePath),
@@ -80,8 +92,9 @@ export async function syncProject(ctx: MemoryContext, opts: { force?: string[]; 
   const indexer = new FileIndexer(ctx);
   indexer.setKnownPaths(manifest.listFiles(), changes.scanned.map((s) => s.relativePath));
   const queue = [...changes.added, ...changes.changed].sort((a, b) => (a.relativePath < b.relativePath ? -1 : 1));
-  const resumeFrom = manifest.getMeta(CHECKPOINT_KEY);
-  const pending = resumeFrom ? queue.filter((f) => f.relativePath > resumeFrom) : queue;
+  // The cursor is diagnostic only: the manifest records successful writes, not path order.
+  const pending = queue;
+  let checkpointBlocked = false;
   const concurrency = Math.max(1, ctx.config.indexConcurrency ?? DEFAULT_CONCURRENCY);
   const indexOne = async (f: ScannedFile): Promise<void> => {
     try {
@@ -93,16 +106,26 @@ export async function syncProject(ctx: MemoryContext, opts: { force?: string[]; 
     }
   };
   for (let i = 0; i < pending.length; i += concurrency) {
+    progress({ stage: 'indexing', processed: i, total: pending.length });
     const batch = pending.slice(i, i + concurrency);
-    await Promise.all(batch.map(indexOne));
-    manifest.setMeta(CHECKPOINT_KEY, batch[batch.length - 1].relativePath);
+    const errorsBefore = report.errors.length;
+    const outcomes = await Promise.allSettled(batch.map(indexOne));
+    const failure = outcomes.find((outcome) => outcome.status === 'rejected');
+    if (failure?.status === 'rejected') throw failure.reason;
+    if (report.errors.length > errorsBefore) checkpointBlocked = true;
+    if (!checkpointBlocked) manifest.setMeta(CHECKPOINT_KEY, batch[batch.length - 1].relativePath);
   }
-  manifest.setMeta(CHECKPOINT_KEY, '');
-  const embedding = await embedPending(ctx, {
+  if (!report.errors.length) manifest.setMeta(CHECKPOINT_KEY, '');
+  progress({ stage: 'indexing', processed: pending.length, total: pending.length });
+  const embedding = opts.mode === 'structural' ? { status: 'unknown' as const, error: '' } : await embedPending(ctx, {
     batchSize: ctx.config.embedBatchSize ?? DEFAULT_EMBED_BATCH,
     concurrency: ctx.config.embedConcurrency ?? DEFAULT_EMBED_CONCURRENCY,
+    progress,
   });
-  if (changes.added.length || changes.removed.length) rebuildRelations(ctx);
+  if (manifest.getMeta(RELATIONS_PENDING_KEY) === '1') {
+    rebuildRelations(ctx);
+    manifest.setMeta(RELATIONS_PENDING_KEY, '');
+  }
   report.semantic = embedding.status;
   report.semanticError = embedding.error;
   manifest.finishRun(runId, report.added.length + report.changed.length, report.removed.length, report.errors.length);

@@ -32,13 +32,14 @@ program.command('migrate').description('Move a legacy per-project .memory to the
 program.command('init').description('Create .memory/, start services, index the project')
   .option(path, 'project directory').option('--no-start', 'do not start Docker services')
   .option('--no-index', 'skip initial indexing').option('--yes', 'non-interactive (default behaviour)')
+  .option('--wait', 'wait for the structural index; embeddings require memory sync')
   .action(act(initCommand));
 program.command('start').option(path).description('Start Qdrant and Typesense').action(act(startCommand));
 program.command('stop').option(path).description('Stop services (data is kept)').action(act(stopCommand));
-program.command('status').option(path).option('--json').description('Show index and service status').action(act(statusCommand));
+program.command('status').option(path).option('--json').option('--job <id>', 'read saved job progress without scanning or health checks').description('Show index and service status').action(act(statusCommand));
 program.command('doctor').option(path).description('Diagnose the environment').action(act(doctorCommand));
 program.command('index').option(path).description('Index new and changed files').action(act((o) => syncCommand(o, 'index')));
-program.command('sync').option(path).description('Sync changes (new, changed, renamed, deleted)').action(act((o) => syncCommand(o)));
+program.command('sync').option(path).option('--background', 'run sync in a detached worker').description('Sync changes (new, changed, renamed, deleted)').action(act((o) => syncCommand(o)));
 program.command('watch').option(path).description('Watch files and update the index').action(act(watchCommand));
 program.command('reindex [paths...]').option(path)
   .description('Rebuild Qdrant and Typesense from source, or only the given paths')

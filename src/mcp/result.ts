@@ -13,6 +13,7 @@ export const fail = (e: unknown): ToolResult => ({
   content: [{ type: 'text', text: redact(JSON.stringify({
     error: e instanceof MemoryError ? e.code : 'internal_error',
     message: e instanceof Error ? e.message : String(e),
+    ...(e instanceof MemoryError && 'job_id' in e ? { job_id: e.job_id } : {}),
   })) }],
 });
 

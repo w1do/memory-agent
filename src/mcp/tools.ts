@@ -16,6 +16,9 @@ import { hasForbiddenExtension } from '../security/policy.js';
 import { redact } from '../security/redact.js';
 import { MemoryError } from '../shared/errors.js';
 import type { ContextResolver } from './projects.js';
+import { launchJob } from '../indexing/background.js';
+import { jobStatus } from '../indexing/job-manifest.js';
+import { getJob } from '../indexing/job-state.js';
 
 export const ANNOTATION_MAX_LENGTH = 200;
 export const ANNOTATION_ROLES = ['module', 'entry', 'test', 'config', 'doc', 'other'] as const;
@@ -105,8 +108,9 @@ export function registerTools(server: McpServer, resolve: ContextResolver): void
   server.registerTool('memory_sync', {
     description: 'Synchronise the whole project; unchanged files are not re-read.',
     inputSchema: {
-      ...project },
+      ...project, background: z.boolean().optional() },
   }, safe(async (a) => {
+    if (a.background) return launchJob(resolve.root ? resolve.root(a.project) : resolve(a.project).root, 'sync');
     const r = await syncProject(resolve(a.project));
     return { added: r.added.length, changed: r.changed.length, renamed: r.renamed.length, removed: r.removed.length, unchanged: r.unchanged, errors: r.errors, semantic: r.semantic };
   }));
@@ -125,8 +129,10 @@ export function registerTools(server: McpServer, resolve: ContextResolver): void
   server.registerTool('memory_status', {
     description: 'State of Qdrant, Typesense, embeddings, counts, last sync, stale files and search mode.',
     inputSchema: {
-      ...project },
-  }, safe((a) => getStatus(resolve(a.project))));
+      ...project, job_id: z.string().optional() },
+  }, safe((a) => a.job_id
+    ? resolve.root ? jobStatus(resolve.root(a.project), a.job_id) : getJob(resolve(a.project).manifest, a.job_id)
+    : getStatus(resolve(a.project))));
 
   server.registerTool('memory_project_structure', {
     description: 'Compact project tree (no file contents).',
