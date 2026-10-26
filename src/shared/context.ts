@@ -25,7 +25,7 @@ export interface MemoryContext {
   close(): void;
 }
 
-export function openContext(root: string, opts: { quiet?: boolean } = {}): MemoryContext {
+export function openContext(root: string, opts: { quiet?: boolean; exportAnnotationsOnClose?: boolean } = {}): MemoryContext {
   const config = loadConfig(root);
   // Resolve once: SQLite, both collections and annotation I/O share this pinned descriptor.
   const generation = activeGeneration(root);
@@ -44,6 +44,9 @@ export function openContext(root: string, opts: { quiet?: boolean } = {}): Memor
     embeddings: createEmbeddingProvider(config, env),
     matcher: loadMatcher(root),
     logger: new Logger(join(memoryDir(root), 'logs', 'memory.log'), opts.quiet),
-    close: () => { try { exportAnnotations(root, manifest); } finally { manifest.close(); } },
+    close: () => {
+      try { if (opts.exportAnnotationsOnClose !== false) exportAnnotations(root, manifest); }
+      finally { manifest.close(); }
+    },
   };
 }

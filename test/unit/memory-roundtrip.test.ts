@@ -27,6 +27,21 @@ async function roundtripFixture() {
 }
 
 describe('dump → import content guarantee', () => {
+  it.each(['sqlite', 'json'])('refuses a secret in annotation summary from %s without exposing its value', async (store) => {
+    const secret = 'sk-' + 'FAKE'.repeat(8);
+    let sourceRoot = '';
+    const error = await generationFixture((source) => {
+      sourceRoot = source.root;
+      const annotation = { relativePath: source.file.relativePath, contentHash: source.file.sha256,
+        summary: `Uses ${secret}`, role: 'module', author: 'agent', updatedAt: '2026-10-26T01:00:00.000Z' };
+      if (store === 'sqlite') source.manifest.upsertAnnotation(annotation);
+      else writeFileSync(join(source.root, '.memory/annotations.json'), JSON.stringify([annotation]));
+    }).then(() => { throw new Error('Secret was exported'); }, (error: Error) => error);
+    expect(error.message).toContain('Secret detected in summary');
+    expect(error.message).not.toContain(secret);
+    expect(existsSync(join(sourceRoot, 'memory/backup'))).toBe(false);
+  });
+
   it('round-trips a clean project with duplicate chunk ordinals and all logical hashes', async () => {
     const f = await roundtripFixture();
     const source = { index: f.source.manifest.transferSnapshot(), vectors: f.source.vectors, lexical: f.source.lexical };

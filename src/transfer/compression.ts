@@ -1,4 +1,4 @@
-import { createReadStream, createWriteStream, statSync } from 'node:fs';
+import { closeSync, constants, createReadStream, createWriteStream, fstatSync, openSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { Readable, Transform } from 'node:stream';
@@ -9,15 +9,18 @@ import type { DumpManifestBody } from './manifest.js';
 
 export type Artifact = DumpManifestBody['artifacts'][number];
 
-export async function writeArtifact(file: string, path: Artifact['path'], input: Readable): Promise<Artifact> {
-  await mkdir(dirname(file), { recursive: true, mode: 0o700 });
+export async function writeArtifact(file: string, path: Artifact['path'], input: Readable, outputFd?: number): Promise<Artifact> {
+  if (outputFd === undefined) await mkdir(dirname(file), { recursive: true, mode: 0o700 });
+  const fd = outputFd ?? openSync(file, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
   let uncompressedSize = 0;
   const hash = createHash('sha256');
   const count = new Transform({ transform(data: Buffer, _, cb) { uncompressedSize += data.length; cb(null, data); } });
   const digest = new Transform({ transform(data: Buffer, _, cb) { hash.update(data); cb(null, data); } });
   const streams = path.endsWith('.zst') ? [input, count, createZstdCompress(), digest] : [input, count, digest];
-  await pipeline([...streams, createWriteStream(file, { flags: 'wx', mode: 0o600 })]);
-  return { path, sha256: hash.digest('hex'), compressedSize: statSync(file).size, uncompressedSize };
+  try {
+    await pipeline([...streams, createWriteStream(file, { fd, autoClose: false })]);
+    return { path, sha256: hash.digest('hex'), compressedSize: fstatSync(fd).size, uncompressedSize };
+  } finally { closeSync(fd); }
 }
 
 export async function unpackArtifact(file: string, target: string, artifact: Artifact): Promise<void> {

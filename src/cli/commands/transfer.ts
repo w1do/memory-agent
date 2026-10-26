@@ -21,5 +21,5 @@ export async function dumpCommand(name: string, opts: { path?: string }): Promis
   await withContext(opts.path, async (ctx) => {
     const manifest = await dumpMemory(ctx, name);
     console.log(`Dump ${name}: ${manifest.dumpId}`);
-  });
+  }, { exportAnnotationsOnClose: false });
 }

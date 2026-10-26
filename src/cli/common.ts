@@ -7,8 +7,9 @@ import type { SyncReport } from '../indexing/sync.js';
 
 export const rootFrom = (path?: string): string => findProjectRoot(path ? resolve(path) : process.cwd());
 
-export async function withContext<T>(path: string | undefined, fn: (ctx: MemoryContext) => Promise<T>): Promise<T> {
-  const ctx = openContext(rootFrom(path));
+export async function withContext<T>(path: string | undefined, fn: (ctx: MemoryContext) => Promise<T>,
+  opts: { exportAnnotationsOnClose?: boolean } = {}): Promise<T> {
+  const ctx = openContext(rootFrom(path), opts);
   try { return await fn(ctx); } finally { ctx.close(); }
 }
 

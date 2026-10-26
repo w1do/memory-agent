@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdirSync, realpathSync } from 'node:fs';
+import { closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, realpathSync } from 'node:fs';
 import { join, isAbsolute } from 'node:path';
 import { DEFAULT_EXCLUDES, ExcludeMatcher, hasForbiddenExtension } from '../security/policy.js';
 
@@ -35,4 +35,21 @@ export function dumpPath(root: string, name: string, create = false): string {
   const dir = join(root, 'memory');
   if (create && !existsSync(dir)) mkdirSync(dir, { mode: 0o700 });
   return join(dir, name);
+}
+
+/** Linux descriptor paths keep I/O attached to the opened inode across renames. Fail closed elsewhere. */
+export function pinDirectory(path: string) {
+  if (process.platform !== 'linux') throw new Error('Secure dump directory descriptors require Linux');
+  const fd = openSync(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  const identity = fstatSync(fd);
+  return {
+    path: `/proc/self/fd/${fd}`,
+    assertAt(location: string) {
+      const current = lstatSync(location);
+      if (!current.isDirectory() || current.dev !== identity.dev || current.ino !== identity.ino) {
+        throw new Error('Dump directory changed; export refused');
+      }
+    },
+    close() { closeSync(fd); },
+  };
 }
