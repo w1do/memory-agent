@@ -1,6 +1,7 @@
 import { QDRANT_IMAGE, TYPESENSE_IMAGE } from '../cli/compose.js';
 import type { GlobalEnv } from './env.js';
 
+/** Typesense needs a high open-file limit: at the Docker default (1024) it lost its raft leader under load. */
 /** One machine-wide stack: Qdrant and Typesense bound to loopback only, persistent data under the global dir. */
 export function renderSharedCompose(env: GlobalEnv, user?: string): string {
   const userLine = user ? `    user: "${user}"\n` : '';
@@ -30,6 +31,10 @@ ${userLine}    restart: unless-stopped
     image: ${TYPESENSE_IMAGE}
     container_name: memory-shared-typesense
 ${userLine}    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     environment:
       TYPESENSE_API_KEY: \${TYPESENSE_API_KEY:?set TYPESENSE_API_KEY in global.env}
       TYPESENSE_DATA_DIR: /data
