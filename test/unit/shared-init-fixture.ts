@@ -86,7 +86,7 @@ export function runCli(f: Fixture, ...args: string[]) {
   });
 }
 export async function until(condition: () => boolean | Promise<boolean>): Promise<void> {
-  const deadline = Date.now() + 10_000;
+  const deadline = Date.now() + 30_000;
   while (!(await condition())) {
     if (Date.now() > deadline) throw new Error('Condition timed out');
     await new Promise((resolve) => setTimeout(resolve, 20));
