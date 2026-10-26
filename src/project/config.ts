@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { basename, join } from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -72,7 +72,14 @@ export function loadConfig(root: string): MemoryConfig {
 
 export function saveConfig(config: MemoryConfig): void {
   mkdirSync(memoryDir(config.root), { recursive: true });
-  writeFileSync(configPath(config.root), JSON.stringify(config, null, 2) + '\n');
+  const target = configPath(config.root);
+  const temp = `${target}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
+  try {
+    writeFileSync(temp, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 });
+    renameSync(temp, target);
+  } finally {
+    if (existsSync(temp)) unlinkSync(temp);
+  }
 }
 
 export type EnvMap = Record<string, string>;

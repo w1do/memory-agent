@@ -82,6 +82,7 @@ describe('embedPending cross-file batching', () => {
     const failed = await embedPending(makeCtx(manifest, state), { batchSize: 96, concurrency: 2 });
 
     expect(failed.status).toBe('unavailable');
+    expect(state.inFlight).toBe(0);
     expect(failed.error).not.toContain('sk-abcdefghijklmnopqrstuvwx');
     expect(manifest.unembeddedChunks(1000)).toHaveLength(250);
 

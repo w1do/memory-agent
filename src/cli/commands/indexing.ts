@@ -5,10 +5,14 @@ import { syncProject } from '../../indexing/sync.js';
 import { updatePaths } from '../../indexing/update.js';
 import { openContext } from '../../shared/context.js';
 import { toPosix } from '../../project/paths.js';
+import { launchJob } from '../../indexing/background.js';
 
-type P = { path?: string };
+type P = { path?: string; background?: boolean };
 
-export const syncCommand = (o: P, kind = 'sync') => withContext(o.path, async (ctx) => printSync(await syncProject(ctx, { kind })));
+export const syncCommand = async (o: P, kind = 'sync') => {
+  if (o.background) { console.log(JSON.stringify(await launchJob(rootFrom(o.path), 'sync'))); return; }
+  return withContext(o.path, async (ctx) => printSync(await syncProject(ctx, { kind })));
+};
 
 export const reindexCommand = (o: P, paths: string[] = []) => withContext(o.path, async (ctx) => {
   if (paths.length) {
@@ -41,7 +45,12 @@ export async function watchCommand(o: P): Promise<void> {
     try {
       const results = await updatePaths(ctx, paths);
       results.filter((r) => r.status !== 'skipped').forEach((r) => ctx.logger.info(`watch: ${r.status} ${r.path}`));
-    } catch (e) { ctx.logger.error(`watch update failed: ${(e as Error).message}`); }
+    } catch (e) {
+      if ((e as { code?: string }).code === 'busy') {
+        paths.forEach((path) => pending.add(path));
+        timer = setTimeout(flush, DEBOUNCE_MS);
+      } else ctx.logger.error(`watch update failed: ${(e as Error).message}`);
+    }
     busy = false;
   };
 

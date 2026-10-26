@@ -6,6 +6,20 @@ import type { Annotation, Chunk, FileRecord, Relation, SymbolRecord } from '../s
 
 type Row = Record<string, string | number | null>;
 
+function enableWal(db: DatabaseSync): void {
+  const deadline = Date.now() + 5_000;
+  while (true) {
+    try {
+      db.exec('PRAGMA journal_mode = WAL;');
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/database (?:is )?locked/i.test(message) || Date.now() >= deadline) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+    }
+  }
+}
+
 export interface PendingChunk {
   chunkId: string; fileId: string; relativePath: string; language: string; symbol: string; chunkType: string;
   lineStart: number; lineEnd: number; contentHash: string; content: string; gitCommit: string; indexedAt: string; summary: string;
@@ -30,11 +44,19 @@ export class Manifest {
 
   constructor(file: string) {
     mkdirSync(dirname(file), { recursive: true });
-    this.db = new DatabaseSync(file);
-    this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = OFF;');
-    this.db.exec(SCHEMA);
-    if (!this.all('PRAGMA table_info(chunks)').some((c) => c.name === 'content')) {
-      this.db.exec("ALTER TABLE chunks ADD COLUMN content TEXT NOT NULL DEFAULT ''");
+    this.db = new DatabaseSync(file, { timeout: 5000 });
+    this.db.exec('PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = OFF;');
+    enableWal(this.db);
+    this.db.exec('BEGIN IMMEDIATE;');
+    try {
+      this.db.exec(SCHEMA);
+      if (!this.all('PRAGMA table_info(chunks)').some((c) => c.name === 'content')) {
+        this.db.exec("ALTER TABLE chunks ADD COLUMN content TEXT NOT NULL DEFAULT ''");
+      }
+      this.db.exec('COMMIT;');
+    } catch (error) {
+      this.db.exec('ROLLBACK;');
+      throw error;
     }
   }
 
@@ -48,8 +70,8 @@ export class Manifest {
     this.db.prepare(sql).run(...params);
   }
 
-  tx<T>(fn: () => T): T {
-    this.db.exec('BEGIN');
+  tx<T>(fn: () => T, immediate = false): T {
+    this.db.exec(immediate ? 'BEGIN IMMEDIATE' : 'BEGIN');
     try { const v = fn(); this.db.exec('COMMIT'); return v; }
     catch (e) { this.db.exec('ROLLBACK'); throw e; }
   }
@@ -63,6 +85,20 @@ export class Manifest {
   }
   setMeta(key: string, value: string): void {
     this.run('INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', key, value);
+  }
+  deleteMeta(key: string): void { this.run('DELETE FROM meta WHERE key=?', key); }
+
+  pruneIndexJobs(retain: number, protectedJobId?: string): string[] {
+    return this.all(`DELETE FROM meta WHERE key IN (
+      SELECT key FROM meta WHERE key GLOB 'index_job:*'
+      AND json_extract(value, '$.state') IN ('completed', 'failed', 'interrupted')
+      AND key <> 'index_job:' || COALESCE((SELECT value FROM meta WHERE key='active_index_job'), '')
+      AND key <> 'index_job:' || COALESCE(?, '')
+      ORDER BY json_extract(value, '$.heartbeat') DESC, rowid DESC LIMIT -1 OFFSET ?
+    ) RETURNING value`, protectedJobId ?? '', retain).flatMap((row) => {
+      const job = JSON.parse(row.value as string) as { log_path?: string | null };
+      return job.log_path ? [job.log_path] : [];
+    });
   }
 
   listFiles(): FileRecord[] { return this.all('SELECT * FROM files ORDER BY relative_path').map(toFile); }
@@ -121,6 +157,10 @@ export class Manifest {
     return this.all(
       `SELECT DISTINCT f.relative_path FROM chunks c JOIN files f ON f.id=c.file_id WHERE c.embedded=0`,
     ).map((r) => r.relative_path as string);
+  }
+
+  pendingEmbeddings(): number {
+    return this.all('SELECT COUNT(*) AS n FROM chunks WHERE embedded=0')[0].n as number;
   }
 
   markEmbedded(chunkIds: string[]): void {

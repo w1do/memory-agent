@@ -5,7 +5,7 @@ import { configPath } from '../project/config.js';
 import { openContext, type MemoryContext } from '../shared/context.js';
 import { MemoryError } from '../shared/errors.js';
 
-export type ContextResolver = (project?: string) => MemoryContext;
+export type ContextResolver = ((project?: string) => MemoryContext) & { root?: (project?: string) => string };
 
 /**
  * One MCP process for many projects: the project is the explicit argument, otherwise the one
@@ -13,8 +13,9 @@ export type ContextResolver = (project?: string) => MemoryContext;
  */
 export function createResolver(defaultDir?: string): { resolve: ContextResolver; closeAll(): void } {
   const open = new Map<string, MemoryContext>();
+  const rootOf = (project?: string) => findProjectRoot(resolvePath(project ?? defaultDir ?? process.cwd()));
   const resolve: ContextResolver = (project) => {
-    const root = findProjectRoot(resolvePath(project ?? defaultDir ?? process.cwd()));
+    const root = rootOf(project);
     const cached = open.get(root);
     if (cached) return cached;
     if (!existsSync(configPath(root))) {
@@ -24,6 +25,7 @@ export function createResolver(defaultDir?: string): { resolve: ContextResolver;
     open.set(root, ctx);
     return ctx;
   };
+  resolve.root = rootOf;
   const closeAll = (): void => { for (const c of open.values()) c.close(); open.clear(); };
   return { resolve, closeAll };
 }
