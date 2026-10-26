@@ -1,5 +1,7 @@
 # Общий memory-сервис на все проекты
 
+Исторические описания `memory migrate`: удалено в cleanup-migrate.
+
 Status: Draft
 Code: not started (спецификация, код не пишется до согласования)
 

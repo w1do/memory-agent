@@ -18,7 +18,7 @@ description: Навык для работы с локальной памятью
 
 1. Проверь состояние индекса: MCP-инструмент `memory_status` или команда `memory status`.
    - Если `is_stale` или число устаревших файлов больше нуля, сначала вызови `memory_sync`.
-   - Если Qdrant или Typesense недоступны, сообщи пользователю, что поиск в degraded-режиме, и выполни `memory start`.
+   - Если Qdrant или Typesense недоступны, сообщи пользователю, что поиск в degraded-режиме, и выполни `memory service up`.
 2. Найди нужное через `memory_get_context` (для задачи целиком) или `memory_search` (для точного запроса).
    - Задавай `limit` (по умолчанию не больше 10) и `token_budget` или `max_chars`.
    - Для узкой области используй `path_prefix`, например `src/auth`.
@@ -87,7 +87,7 @@ memory search "<запрос>" --limit 10 [--snippets] [--max-chars 2000] [--mod
 memory sync                                    # инкрементальная синхронизация (новые, изменённые, переименованные, удалённые)
 memory reindex <путь1> <путь2>                 # переиндексация только указанных файлов (удалённые убираются из индексов)
 memory reindex                                 # полное перечитывание всех файлов: только по явной просьбе пользователя
-memory start | memory stop                     # запуск и остановка Qdrant и Typesense
+memory service up | memory service down        # запуск и остановка общих Qdrant и Typesense
 ```
 
 Для точечных правок передавай пути файлов относительно корня проекта в `memory reindex <пути>` или MCP `memory_update`. Директории не раскрываются в файлы, перечисляй их явно.

@@ -8,9 +8,9 @@ import type { EmbeddingProvider } from '../embeddings/provider.js';
 import { loadMatcher } from '../project/scan.js';
 import type { ExcludeMatcher } from '../security/policy.js';
 import { Logger } from './logger.js';
-import { resolveIndexDb } from '../global/index-location.js';
+import { indexDbPath } from '../global/paths.js';
 import { exportAnnotations, importAnnotations } from '../global/annotations-file.js';
-import { isLegacyProject, mergeEnv, sharedPorts } from '../global/shared-mode.js';
+import { mergeEnv, sharedPorts } from '../global/shared-mode.js';
 
 export interface MemoryContext {
   root: string;
@@ -26,10 +26,9 @@ export interface MemoryContext {
 
 export function openContext(root: string, opts: { quiet?: boolean } = {}): MemoryContext {
   const config = loadConfig(root);
-  const legacy = isLegacyProject(root);
-  const env = legacy ? readEnvFile(root) : mergeEnv(readEnvFile(root));
-  const ports = legacy ? { qdrant: config.qdrantPort, typesense: config.typesensePort } : sharedPorts();
-  const manifest = new Manifest(resolveIndexDb(root, config.projectId));
+  const env = mergeEnv(readEnvFile(root));
+  const ports = sharedPorts();
+  const manifest = new Manifest(indexDbPath(config.projectId));
   manifest.ensureProject(config.projectId, config.projectName, root);
   importAnnotations(root, manifest);
   const apiKey = env.TYPESENSE_API_KEY ?? '';

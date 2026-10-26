@@ -20,7 +20,7 @@ async function run(): Promise<void> {
   try {
     if (job.operation === 'init') {
       progressJob(manifest, id, 'services', 0, 0);
-      await prepareInitServices(root);
+      await prepareInitServices();
     }
     clearInterval(heartbeat);
     ctx = openContext(root, { quiet: true });

@@ -1,13 +1,12 @@
 import { existsSync } from 'node:fs';
 import { rootFrom } from '../common.js';
-import { dockerAvailable, servicesState } from '../docker.js';
+import { dockerAvailable } from '../docker.js';
 import { configPath } from '../../project/config.js';
 import { openContext } from '../../shared/context.js';
 import { getStatus } from '../../project/status.js';
-import { legacyHint } from './migrate.js';
 import { globalDir } from '../../global/paths.js';
 import { serviceStatus } from '../../global/service.js';
-import { assertSharedServiceUp, isLegacyProject } from '../../global/shared-mode.js';
+import { assertSharedServiceUp } from '../../global/shared-mode.js';
 import { gitRoot } from '../../project/git.js';
 
 type Check = { name: string; ok: boolean; detail: string; required: boolean };
@@ -26,17 +25,13 @@ export async function doctorCommand(o: { path?: string }): Promise<void> {
   if (!existsSync(configPath(root))) {
     add('project', false, `not initialised in ${root}; run "memory init"`, false);
   } else {
-    const hint = legacyHint(root);
-    if (hint) add('shared service', false, hint, false);
-    else {
-      const up = await assertSharedServiceUp().then(() => true, () => false);
-      add('shared service', up, up ? `running (config ${globalDir()}/global.env)` : 'not running; run "memory service up"');
-    }
+    const up = await assertSharedServiceUp().then(() => true, () => false);
+    add('shared service', up, up ? `running (config ${globalDir()}/global.env)` : 'not running; run "memory service up"');
     const ctx = openContext(root, { quiet: true });
     try {
       const s = await getStatus(ctx);
       if (docker.ok) {
-        const st = isLegacyProject(root) ? servicesState(root) : serviceStatus();
+        const st = serviceStatus();
         add('containers', true, st.output.replace(/\n/g, '; ') || 'none running', false);
       }
       add('qdrant', s.qdrant.ok, `${s.qdrant.detail}${s.qdrant.count !== undefined ? `, ${s.qdrant.count} points` : ''}`);

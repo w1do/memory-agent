@@ -1,19 +1,16 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createDefaultConfig, ensureEnvFile, configPath, loadConfig, memoryDir, saveConfig, type MemoryConfig } from '../project/config.js';
-import { renderCompose } from './compose.js';
+import { createDefaultConfig, configPath, loadConfig, memoryDir, saveConfig, type MemoryConfig } from '../project/config.js';
 import { registerProject } from '../global/registry.js';
-import { isLegacyProject, sharedPorts } from '../global/shared-mode.js';
-import { resolveIndexDb } from '../global/index-location.js';
+import { sharedPorts } from '../global/shared-mode.js';
+import { indexDbPath } from '../global/paths.js';
 import { Manifest } from '../storage/manifest.js';
 import { isActive, readJob } from '../indexing/job-state.js';
 
 /** Idempotent: existing config, .env, data and ignore rules are preserved. */
 export async function scaffold(root: string): Promise<MemoryConfig> {
-  const legacy = isLegacyProject(root);
-  const proposed = existsSync(configPath(root)) ? loadConfig(root) : await createDefaultConfig(root, legacy ? undefined : sharedPorts());
-  const manifest = new Manifest(resolveIndexDb(root, proposed.projectId));
+  const proposed = existsSync(configPath(root)) ? loadConfig(root) : await createDefaultConfig(root, sharedPorts());
+  const manifest = new Manifest(indexDbPath(proposed.projectId));
   try {
     // Serialise initial creation as well as repeat writes with acquireJob.
     return manifest.tx(() => {
@@ -21,28 +18,15 @@ export async function scaffold(root: string): Promise<MemoryConfig> {
       const config = configExists ? loadConfig(root) : proposed;
       const active = manifest.getMeta('active_index_job');
       if (active && isActive(readJob(manifest, active))) return config;
-      return writeScaffold(root, config, legacy, configExists);
+      return writeScaffold(root, config, configExists);
     }, true);
   } finally { manifest.close(); }
 }
 
-function writeScaffold(root: string, config: MemoryConfig, legacy: boolean, configExists: boolean): MemoryConfig {
+function writeScaffold(root: string, config: MemoryConfig, configExists: boolean): MemoryConfig {
   const dir = memoryDir(root);
-  const subs = legacy ? ['data/qdrant', 'data/typesense', 'logs', 'generated'] : ['logs', 'generated'];
-  for (const sub of subs) mkdirSync(join(dir, sub), { recursive: true });
+  for (const sub of ['logs', 'generated']) mkdirSync(join(dir, sub), { recursive: true });
   if (!configExists) saveConfig(config);
-  if (legacy) {
-    ensureEnvFile(root);
-    const user = typeof process.getuid === 'function' ? `${process.getuid()}:${process.getgid?.()}` : undefined;
-    const target = join(dir, 'docker-compose.yml');
-    const temp = `${target}.${randomUUID()}.tmp`;
-    try {
-      writeFileSync(temp, renderCompose(config, user), { flag: 'wx', mode: 0o600 });
-      renameSync(temp, target);
-    } finally {
-      if (existsSync(temp)) unlinkSync(temp);
-    }
-  }
   writeFileSync(join(dir, '.gitignore'), '*\n!.gitignore\n!mcp.example.json\n!annotations.json\n');
   writeFileSync(join(dir, 'mcp.example.json'), JSON.stringify(mcpExample(root), null, 2) + '\n');
   ensureRootGitignore(root);
