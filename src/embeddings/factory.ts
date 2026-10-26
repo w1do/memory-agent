@@ -2,6 +2,16 @@ import type { MemoryConfig, EnvMap } from '../project/config.js';
 import { NullEmbeddingProvider, type EmbeddingProvider } from './provider.js';
 import { OpenAICompatibleProvider } from './openai.js';
 
+/** True only for loopback hosts; a name like localhost.example.com is not local. */
+function isLocalUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname;
+    return host === '127.0.0.1' || host === 'localhost' || host === '[::1]' || host === '::1';
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Settings priority: process env > .memory/.env > config.json.
  * Without a base URL and key (or a local endpoint) semantic search is reported as unavailable.
@@ -12,7 +22,7 @@ export function createEmbeddingProvider(config: MemoryConfig, env: EnvMap): Embe
   const apiKey = pick('EMBEDDING_API_KEY');
   const model = pick('EMBEDDING_MODEL') || config.embedding.model;
   const dimensions = Number(pick('EMBEDDING_DIMENSIONS')) || config.embedding.dimensions;
-  const isLocal = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])/.test(baseUrl);
+  const isLocal = isLocalUrl(baseUrl);
   if (!apiKey && !isLocal) {
     return new NullEmbeddingProvider('EMBEDDING_API_KEY is not set (or use a local EMBEDDING_BASE_URL)', dimensions);
   }
