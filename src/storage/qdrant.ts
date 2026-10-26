@@ -1,5 +1,6 @@
 import { QdrantClient } from '@qdrant/js-client-rest';
 import { toUuid } from '../shared/hash.js';
+import type { TransferPoint, VectorSnapshot, JsonObject } from '../transfer/types.js';
 
 export interface QdrantPayload {
   project_id: string;
@@ -36,6 +37,28 @@ export class QdrantStore {
     } catch (e) {
       return { ok: false, detail: (e as Error).message };
     }
+  }
+
+  async exportSnapshot(): Promise<VectorSnapshot> {
+    const info = await this.client.getCollection(this.collection);
+    const version = await this.client.api().root({});
+    const points: TransferPoint[] = [];
+    let offset: NonNullable<Parameters<QdrantClient['scroll']>[1]>['offset'];
+    do {
+      const page = await this.client.scroll(this.collection, { limit: 256, offset, with_payload: true, with_vector: true });
+      for (const p of page.points) {
+        if (typeof p.id !== 'string' || !Array.isArray(p.vector)) throw new Error('Unsupported point ID or named/sparse vectors');
+        points.push({ id: p.id, vector: p.vector as number[], payload: p.payload as unknown as QdrantPayload });
+      }
+      offset = page.next_page_offset ?? undefined;
+    } while (offset !== undefined);
+    points.sort((a, b) => a.id.localeCompare(b.id, 'en'));
+    return { version: version.data.version, parameters: info.config.params as unknown as JsonObject, points };
+  }
+
+  async createFromSnapshot(parameters: JsonObject): Promise<void> {
+    if (await this.exists()) throw new Error('Staging Qdrant collection already exists');
+    await this.client.createCollection(this.collection, parameters as unknown as Parameters<QdrantClient['createCollection']>[1]);
   }
 
   async vectorSize(): Promise<number | null> {

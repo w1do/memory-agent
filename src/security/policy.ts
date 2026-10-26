@@ -5,7 +5,7 @@ import { globToRegExp } from '../project/glob.js';
  * versions (whose ignore file lacks these entries) do not index tool or build output.
  */
 export const DEFAULT_EXCLUDES = [
-  '.git/', '.memory/', '.memoryignore',
+  '.git/', '.memory/', '.memoryignore', 'memory/',
   'node_modules/', 'vendor/', 'dist/', 'build/', '.next/', '.nuxt/', '.astro/', '.svelte-kit/',
   '.cache/', 'coverage/', 'tmp/', 'logs/',
   '.claude/', '.codex/', '.junie/', '.cursor/', '.opencode/', '.idea/', '.vscode/',

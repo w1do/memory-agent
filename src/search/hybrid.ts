@@ -57,7 +57,7 @@ export function attachAnnotations(ctx: MemoryContext, hits: SearchHit[]): void {
     if (!byPath.has(h.path)) {
       const file = ctx.manifest.getFile(h.path);
       const annotation = ctx.manifest.getAnnotation(h.path);
-      byPath.set(h.path, file && annotation && annotation.contentHash === file.sha256 ? annotation.summary : undefined);
+      byPath.set(h.path, file && annotation && !annotation.isStale && annotation.contentHash === file.sha256 ? annotation.summary : undefined);
     }
     h.annotation = byPath.get(h.path);
   }

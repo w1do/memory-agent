@@ -17,6 +17,7 @@ export interface FileRecord {
   isConfig: boolean;
   indexedAt: string;
   indexVersion: number;
+  status?: 'indexed' | 'stale' | 'unindexed';
 }
 
 export interface Chunk {
@@ -70,6 +71,7 @@ export interface SearchHit {
 }
 
 export interface Annotation {
+  isStale?: boolean;
   relativePath: string;
   summary: string;
   role: string;

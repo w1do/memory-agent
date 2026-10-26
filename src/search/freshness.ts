@@ -16,7 +16,7 @@ export function checkFreshness(ctx: MemoryContext): Freshness {
     const old = known.get(s.relativePath);
     known.delete(s.relativePath);
     if (!old) added.push(s.relativePath);
-    else if (old.size !== s.size || old.mtimeMs !== s.mtimeMs) stale.add(s.relativePath);
+    else if (old.status === 'stale' || old.size !== s.size || old.mtimeMs !== s.mtimeMs) stale.add(s.relativePath);
   }
   const deleted = [...known.keys()];
   deleted.forEach((p) => stale.add(p));

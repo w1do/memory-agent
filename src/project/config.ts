@@ -13,7 +13,7 @@ export interface MemoryConfig {
   host: '127.0.0.1';
   qdrantPort: number;
   typesensePort: number;
-  embedding: { baseUrl: string; model: string; dimensions: number };
+  embedding: { baseUrl: string; model: string; dimensions: number; revision?: string };
   maxFileSize: number;
   indexConcurrency?: number;
   embedBatchSize?: number;

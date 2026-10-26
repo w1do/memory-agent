@@ -9,6 +9,7 @@ import { doctorCommand } from './commands/doctor.js';
 import { mcpInstallCommand } from './commands/mcp-install.js';
 import { migrateCommand } from './commands/migrate.js';
 import { serviceDownCommand, serviceLogsCommand, serviceStatusCommand, serviceUpCommand } from './commands/service.js';
+import { dumpCommand, importCommand } from './commands/transfer.js';
 
 const program = new Command('memory').description('Local project code memory for AI agents').version('0.1.0');
 const path = '--path <dir>';
@@ -38,6 +39,8 @@ program.command('start').option(path).description('Start Qdrant and Typesense').
 program.command('stop').option(path).description('Stop services (data is kept)').action(act(stopCommand));
 program.command('status').option(path).option('--json').option('--job <id>', 'read saved job progress without scanning or health checks').description('Show index and service status').action(act(statusCommand));
 program.command('doctor').option(path).description('Diagnose the environment').action(act(doctorCommand));
+program.command('dump <name>').option(path).description('Export a consistent portable memory snapshot').action(act(dumpCommand));
+program.command('import <name>').option(path).description('Import a portable snapshot without embedding or sync').action(act(importCommand));
 program.command('index').option(path).description('Index new and changed files').action(act((o) => syncCommand(o, 'index')));
 program.command('sync').option(path).option('--background', 'run sync in a detached worker').description('Sync changes (new, changed, renamed, deleted)').action(act((o) => syncCommand(o)));
 program.command('watch').option(path).description('Watch files and update the index').action(act(watchCommand));

@@ -19,6 +19,8 @@ import type { ContextResolver } from './projects.js';
 import { launchJob } from '../indexing/background.js';
 import { jobStatus } from '../indexing/job-manifest.js';
 import { getJob } from '../indexing/job-state.js';
+import { withMemoryLockSync } from '../storage/memory-lock.js';
+import { assertCurrentGeneration } from '../storage/generation.js';
 
 export const ANNOTATION_MAX_LENGTH = 200;
 export const ANNOTATION_ROLES = ['module', 'entry', 'test', 'config', 'doc', 'other'] as const;
@@ -38,7 +40,7 @@ export function annotateFile(ctx: MemoryContext, input: AnnotateInput) {
   }
   const file = ctx.manifest.getFile(rel);
   if (!file) throw new MemoryError(`File is not indexed: ${rel}`, 'not_indexed');
-  if (file.sha256 !== input.content_hash) {
+  if (file.status === 'stale' || file.sha256 !== input.content_hash) {
     throw new MemoryError(`content_hash does not match the indexed file: ${rel}. Run memory_update first.`, 'hash_mismatch');
   }
   const summary = input.summary.trim();
@@ -48,8 +50,11 @@ export function annotateFile(ctx: MemoryContext, input: AnnotateInput) {
   if (redact(summary) !== summary) {
     throw new MemoryError('summary contains sensitive values and was refused', 'secret_detected');
   }
-  ctx.manifest.upsertAnnotation({
-    relativePath: rel, summary, role: input.role, contentHash: file.sha256, author: 'agent', updatedAt: new Date().toISOString(),
+  withMemoryLockSync(ctx.root, () => {
+    assertCurrentGeneration(ctx.root, ctx.manifest.generationId);
+    ctx.manifest.upsertAnnotation({
+      relativePath: rel, summary, role: input.role, contentHash: file.sha256, author: 'agent', updatedAt: new Date().toISOString(),
+    });
   });
   ctx.logger.info(`memory_annotate: ${rel}`);
   return { path: rel, role: input.role, content_hash: file.sha256, saved: true };

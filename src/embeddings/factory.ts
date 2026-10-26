@@ -1,6 +1,7 @@
 import type { MemoryConfig, EnvMap } from '../project/config.js';
 import { NullEmbeddingProvider, type EmbeddingProvider } from './provider.js';
 import { OpenAICompatibleProvider } from './openai.js';
+import { effectiveFingerprint } from '../transfer/provenance.js';
 
 /** True only for loopback hosts; a name like localhost.example.com is not local. */
 function isLocalUrl(url: string): boolean {
@@ -26,5 +27,6 @@ export function createEmbeddingProvider(config: MemoryConfig, env: EnvMap): Embe
   if (!apiKey && !isLocal) {
     return new NullEmbeddingProvider('EMBEDDING_API_KEY is not set (or use a local EMBEDDING_BASE_URL)', dimensions);
   }
-  return new OpenAICompatibleProvider({ baseUrl, apiKey, model, dimensions, batchSize: config.embedBatchSize ?? 96, sendDimensions: isLocal });
+  const provider = new OpenAICompatibleProvider({ baseUrl, apiKey, model, dimensions, batchSize: config.embedBatchSize ?? 96, sendDimensions: isLocal });
+  return Object.assign(provider, { fingerprint: () => effectiveFingerprint(config, env) });
 }

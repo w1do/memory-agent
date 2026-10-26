@@ -40,7 +40,7 @@ export function detectChanges(ctx: MemoryContext, force: Set<string> = new Set()
     const old = known.get(s.relativePath);
     known.delete(s.relativePath);
     if (!old) { changes.added.push(s); continue; }
-    if (force.has(s.relativePath)) { changes.changed.push(s); continue; }
+    if (force.has(s.relativePath) || old.status === 'stale') { changes.changed.push(s); continue; }
     const suspicious = old.size !== s.size || old.mtimeMs !== s.mtimeMs || dirty.has(s.relativePath);
     if (suspicious && sha256(readFileSync(s.absolutePath)) !== old.sha256) { changes.changed.push(s); continue; }
     if (old.mtimeMs !== s.mtimeMs || old.gitCommit !== commit) ctx.manifest.touchFile(old.id, s.mtimeMs, commit, branch);

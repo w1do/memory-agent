@@ -3,6 +3,7 @@ import { redact } from '../security/redact.js';
 import type { PendingChunk } from '../storage/manifest.js';
 import { toPayload } from './file-indexer.js';
 import type { Progress } from './writer.js';
+import { recordProvenance } from '../transfer/provenance.js';
 
 export interface EmbedPendingOptions { batchSize: number; concurrency: number; progress?: Progress }
 export interface EmbedPendingResult { embedded: number; status: 'ok' | 'unavailable'; error: string }
@@ -33,6 +34,7 @@ export async function embedPending(ctx: MemoryContext, opts: EmbedPendingOptions
       for (let i = 0; i < round.length; i += batchSize) batches.push(round.slice(i, i + batchSize));
       const results = await Promise.allSettled(batches.map(async (batch) => {
         const vectors = await embeddings.embedBatch(batch.map(textOf));
+        recordProvenance(manifest, embeddings.fingerprint?.());
         await ensure(vectors[0].length);
         await qdrant.upsert(batch.map((c, i) => ({
           chunkId: c.chunkId, vector: vectors[i],

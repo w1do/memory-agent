@@ -1,12 +1,38 @@
 import type { MemoryContext } from '../shared/context.js';
 import { Logger } from '../shared/logger.js';
-import { acquireJob, busy, finishJob, progressJob, readJob, startJob, type JobOperation } from './job-state.js';
+import { acquireJob, busy, finishJob, isActive, progressJob, readJob, startJob, type JobOperation } from './job-state.js';
+import { acquireMemoryLock } from '../storage/memory-lock.js';
+import { MemoryError } from '../shared/errors.js';
+import { assertCurrentGeneration } from '../storage/generation.js';
 
 export interface JobProgress { stage: string; processed: number; total: number }
 export type Progress = (progress: JobProgress) => void;
 
 /** Every structural writer takes the same persisted lease before doing network work or scanning. */
 export async function withWriter<T>(
+  ctx: MemoryContext, operation: JobOperation, work: (progress: Progress) => Promise<T>,
+  errorOf: (result: T) => string, jobId?: string,
+): Promise<T> {
+  let release;
+  try { release = acquireMemoryLock(ctx.root); }
+  catch (error) {
+    if (error instanceof MemoryError && error.code === 'busy') {
+      const active = ctx.manifest.getMeta('active_index_job');
+      if (active) {
+        const job = readJob(ctx.manifest, active);
+        if (isActive(job)) throw busy(job);
+      }
+    }
+    throw error;
+  }
+  try {
+    assertCurrentGeneration(ctx.root, ctx.manifest.generationId);
+    return await runWriter(ctx, operation, work, errorOf, jobId);
+  }
+  finally { release(); }
+}
+
+async function runWriter<T>(
   ctx: MemoryContext, operation: JobOperation, work: (progress: Progress) => Promise<T>,
   errorOf: (result: T) => string, jobId?: string,
 ): Promise<T> {

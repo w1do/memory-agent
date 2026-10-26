@@ -3,6 +3,8 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { SCHEMA } from './schema.js';
 import type { Annotation, Chunk, FileRecord, Relation, SymbolRecord } from '../shared/types.js';
+import { assertSourceReady, readIndex } from '../transfer/sqlite.js';
+import { withMemoryLockSync } from './memory-lock.js';
 
 type Row = Record<string, string | number | null>;
 
@@ -28,6 +30,7 @@ export interface PendingChunk {
 const toAnnotation = (r: Row): Annotation => ({
   relativePath: r.relative_path as string, summary: r.summary as string, role: r.role as string,
   contentHash: r.content_hash as string, author: r.author as string, updatedAt: r.updated_at as string,
+  ...(r.file_status === 'stale' ? { isStale: true } : {}),
 });
 
 const toFile = (r: Row): FileRecord => ({
@@ -36,13 +39,19 @@ const toFile = (r: Row): FileRecord => ({
   mtimeMs: r.mtime_ms as number, gitBranch: r.git_branch as string, gitCommit: r.git_commit as string,
   isTest: !!r.is_test, isDocumentation: !!r.is_documentation, isConfig: !!r.is_config,
   indexedAt: r.indexed_at as string, indexVersion: r.index_version as number,
+  ...(r.status !== 'indexed' ? { status: r.status as FileRecord['status'] } : {}),
 });
 
 /** Canonical local manifest. Qdrant and Typesense are derived from it and can be rebuilt. */
 export class Manifest {
   private readonly db: DatabaseSync;
 
-  constructor(file: string) {
+  readonly generationId?: string;
+  readonly annotationsFile?: string;
+  constructor(readonly filePath: string, generation?: { id: string; annotationsPath: string }) {
+    const file = filePath;
+    this.generationId = generation?.id;
+    this.annotationsFile = generation?.annotationsPath;
     mkdirSync(dirname(file), { recursive: true });
     this.db = new DatabaseSync(file, { timeout: 5000 });
     this.db.exec('PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = OFF;');
@@ -62,11 +71,16 @@ export class Manifest {
 
   close(): void { this.db.close(); }
 
+  transferSnapshot() { assertSourceReady(this.db); return readIndex(this.db); }
+
   private all(sql: string, ...params: Array<string | number>): Row[] {
     return this.db.prepare(sql).all(...params) as Row[];
   }
 
   private run(sql: string, ...params: Array<string | number | null>): void {
+    // Imported generations track every local manifest write, including annotation/job changes.
+    // Set this first so a process death between statements cannot hide a completed mutation.
+    this.db.prepare("UPDATE meta SET value='1' WHERE key='import_dirty'").run();
     this.db.prepare(sql).run(...params);
   }
 
@@ -77,7 +91,8 @@ export class Manifest {
   }
 
   ensureProject(id: string, name: string, root: string): void {
-    this.run('INSERT OR IGNORE INTO projects(id,name,root,created_at) VALUES(?,?,?,?)', id, name, root, new Date().toISOString());
+    if (this.all('SELECT id FROM projects WHERE id=?', id).length) return;
+    withMemoryLockSync(root, () => this.run('INSERT OR IGNORE INTO projects(id,name,root,created_at) VALUES(?,?,?,?)', id, name, root, new Date().toISOString()));
   }
 
   getMeta(key: string): string | undefined {
@@ -266,19 +281,19 @@ export class Manifest {
   }
 
   getAnnotation(relativePath: string): Annotation | undefined {
-    const r = this.all('SELECT * FROM annotations WHERE relative_path=?', relativePath)[0];
+    const r = this.all('SELECT a.*, f.status AS file_status FROM annotations a LEFT JOIN files f ON f.relative_path=a.relative_path WHERE a.relative_path=?', relativePath)[0];
     return r ? toAnnotation(r) : undefined;
   }
 
   listAnnotations(): Annotation[] {
-    return this.all('SELECT * FROM annotations ORDER BY relative_path').map(toAnnotation);
+    return this.all('SELECT a.*, f.status AS file_status FROM annotations a LEFT JOIN files f ON f.relative_path=a.relative_path ORDER BY a.relative_path').map(toAnnotation);
   }
 
   /** Files without an annotation, or whose annotation was written for an older content hash. */
   pendingAnnotations(limit = 20): Array<{ relativePath: string; sha256: string }> {
     return this.all(
       `SELECT f.relative_path, f.sha256 FROM files f LEFT JOIN annotations a ON a.relative_path=f.relative_path
-       WHERE a.relative_path IS NULL OR a.content_hash<>f.sha256 ORDER BY f.relative_path LIMIT ?`, limit,
+       WHERE a.relative_path IS NULL OR a.content_hash<>f.sha256 OR f.status='stale' ORDER BY f.relative_path LIMIT ?`, limit,
     ).map((r) => ({ relativePath: r.relative_path as string, sha256: r.sha256 as string }));
   }
 

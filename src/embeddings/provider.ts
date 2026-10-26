@@ -1,4 +1,7 @@
+import type { EmbeddingFingerprint } from '../transfer/manifest.js';
+
 export interface EmbeddingProvider {
+  fingerprint?(): EmbeddingFingerprint | undefined;
   embed(text: string): Promise<number[]>;
   embedBatch(texts: string[]): Promise<number[][]>;
   dimensions(): number;

@@ -2,6 +2,8 @@ import { fork } from 'node:child_process';
 import { openJobManifest } from './job-manifest.js';
 import { acquireJob, finishJob, getJob, type IndexJob, type JobOperation } from './job-state.js';
 import { MemoryError } from '../shared/errors.js';
+import { withMemoryLockSync } from '../storage/memory-lock.js';
+import { assertCurrentGeneration } from '../storage/generation.js';
 
 function workerEnv(operation: JobOperation): NodeJS.ProcessEnv {
   const allowed = ['PATH', 'HOME', 'USERPROFILE', 'TMPDIR', 'TMP', 'TEMP', 'SYSTEMROOT', 'WINDIR', 'LANG', 'LC_ALL', 'PROJECT_MEMORY_HOME'];
@@ -16,7 +18,17 @@ export interface LaunchOptions { worker?: URL; timeoutMs?: number }
 export async function launchJob(root: string, operation: JobOperation, opts: LaunchOptions = {}): Promise<JobReply> {
   const manifest = openJobManifest(root);
   try {
-    const { job, created } = acquireJob(manifest, root, operation);
+    let claimed;
+    try { claimed = withMemoryLockSync(root, () => {
+      assertCurrentGeneration(root, manifest.generationId);
+      return acquireJob(manifest, root, operation);
+    }); }
+    catch (e) {
+      const active = manifest.getMeta('active_index_job');
+      if (!(e instanceof MemoryError) || e.code !== 'busy' || !active) throw e;
+      claimed = { job: getJob(manifest, active), created: false };
+    }
+    const { job, created } = claimed;
     if (!created) {
       if (operation !== 'init' || job.operation !== 'init') return { status: 'busy', job_id: job.id, job };
       const deadline = Date.now() + (opts.timeoutMs ?? 8000);

@@ -1,5 +1,6 @@
 import Typesense from 'typesense';
 import type { Chunk, FileRecord } from '../shared/types.js';
+import type { LexicalSnapshot, JsonObject } from '../transfer/types.js';
 
 export interface TsDoc {
   id: string;
@@ -52,6 +53,20 @@ export class TypesenseStore {
     } catch (e) {
       return { ok: false, detail: (e as Error).message };
     }
+  }
+
+  async exportSnapshot(): Promise<LexicalSnapshot> {
+    const schema = await this.client.collections(this.opts.collection).retrieve();
+    const { version } = await this.client.debug.retrieve();
+    const text = await this.client.collections(this.opts.collection).documents().export();
+    const documents = text.split('\n').filter((s) => s.trim()).map((s) => JSON.parse(s) as TsDoc);
+    documents.sort((a, b) => a.id.localeCompare(b.id, 'en'));
+    return { version, schema: schema as unknown as JsonObject, documents };
+  }
+
+  async createFromSnapshot(schema: JsonObject): Promise<void> {
+    const { name: _name, num_documents: _count, created_at: _created, ...settings } = schema;
+    await this.client.collections().create({ ...settings, name: this.opts.collection } as never);
   }
 
   async ensureCollection(): Promise<void> {
