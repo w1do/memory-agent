@@ -59,6 +59,11 @@ describe('global paths and shared compose', () => {
     expect(yaml).toContain('global.env');
     expect(yaml).not.toMatch(/0\.0\.0\.0/);
   });
+
+  it('raises the Typesense open-file limit above the Docker default', () => {
+    const yaml = renderSharedCompose(parseEnv(''));
+    expect(yaml).toContain('ulimits:\n      nofile:\n        soft: 65536\n        hard: 65536');
+  });
 });
 
 describe('index location', () => {
