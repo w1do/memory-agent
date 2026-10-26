@@ -3,7 +3,6 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { listProjects, registerProject } from '../../src/global/registry.js';
-import { rollbackProject } from '../../src/global/migrate.js';
 import { scaffold } from '../../src/cli/scaffold.js';
 
 let home: string;
@@ -17,12 +16,6 @@ describe('registry', () => {
     const p = tmp();
     registerProject(p); registerProject(p);
     expect(listProjects()).toEqual([p]);
-  });
-});
-
-describe('rollback', () => {
-  it('skips when there is no backup', () => {
-    expect(rollbackProject(tmp()).status).toBe('skipped');
   });
 });
 

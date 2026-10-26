@@ -36,7 +36,7 @@ export async function initCommand(opts: InitOptions): Promise<void> {
         probe.warnings.forEach((w) => console.log(`  ${w}`));
       } finally { ctx.close(); }
     }
-  } else if (opts.start) await prepareInitServices(root);
+  } else if (opts.start) await prepareInitServices();
   console.log('\nMCP client config (also saved to .memory/mcp.example.json):');
   console.log(JSON.stringify(mcpExample(root), null, 2));
   console.log('\nSemantic search: put your Polza.AI key into EMBEDDING_API_KEY in ~/.config/project-memory/global.env (default: https://polza.ai/api/v1, openai/text-embedding-3-small)');

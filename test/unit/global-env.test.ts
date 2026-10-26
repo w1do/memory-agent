@@ -65,21 +65,3 @@ describe('global paths and shared compose', () => {
     expect(yaml).toContain('ulimits:\n      nofile:\n        soft: 65536\n        hard: 65536');
   });
 });
-
-describe('index location', () => {
-  it('copies a legacy project index.db into the global dir once', async () => {
-    const { resolveIndexDb } = await import('../../src/global/index-location.js');
-    const { mkdirSync, existsSync } = await import('node:fs');
-    const root = mkdtempSync(join(tmpdir(), 'pm-proj-'));
-    mkdirSync(join(root, '.memory'));
-    writeFileSync(join(root, '.memory', 'index.db'), 'legacy');
-    const target = resolveIndexDb(root, 'demo-1');
-    expect(target).toBe(indexDbPath('demo-1'));
-    expect(readFileSync(target, 'utf8')).toBe('legacy');
-    writeFileSync(target, 'changed');
-    resolveIndexDb(root, 'demo-1');
-    expect(readFileSync(target, 'utf8')).toBe('changed');
-    expect(existsSync(join(root, '.memory', 'index.db'))).toBe(true);
-    rmSync(root, { recursive: true, force: true });
-  });
-});

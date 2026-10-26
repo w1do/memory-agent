@@ -1,11 +1,6 @@
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
-import { memoryDir, type EnvMap } from '../project/config.js';
+import type { EnvMap } from '../project/config.js';
 import { ensureGlobalEnv, readGlobalEnv } from './env.js';
 import { MemoryError } from '../shared/errors.js';
-
-/** A project with its own docker-compose.yml still uses per-project services (legacy until migrated). */
-export const isLegacyProject = (root: string): boolean => existsSync(join(memoryDir(root), 'docker-compose.yml'));
 
 export const sharedPorts = (): { qdrant: number; typesense: number } => {
   const env = ensureGlobalEnv();

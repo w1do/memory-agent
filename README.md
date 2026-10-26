@@ -26,7 +26,6 @@ memory search "где авторизация"
 - `memory service up|down|status|logs` управляет одним стеком для всех проектов (порты только на `127.0.0.1`). Настройки и ключи (`TYPESENSE_API_KEY`, `EMBEDDING_*`) лежат в `~/.config/project-memory/global.env` (права 600); каталог можно сменить через `PROJECT_MEMORY_HOME`.
 - Кэш индекса `index.db` хранится в `~/.config/project-memory/index/<projectId>/`. В проекте остаются `config.json`, `.ignore`, `annotations.json` (коммитится) и необязательный `.env`.
 - `memory mcp` — один процесс для всех проектов: проект берётся из текущего каталога или параметра `project`.
-- Старые проекты с собственным Docker: `memory migrate` (один проект), `--scan <dir> [--apply]`, `--all` (по реестру `projects.json`), `--cleanup`, `--rollback`. Перед переносом делается бэкап `.memory.bak-<дата>`.
 
 Флаги `init`: `--path <dir>`, `--wait`, `--no-start`, `--no-index`, `--yes`. Теперь `memory init` по умолчанию возвращает `accepted` и `job_id` после сохранения задачи и подтверждения запуска независимого worker. Это ещё не готовый индекс (`ready`): структурный этап готов после состояния `completed`. Скриптам, которым сразу нужен лексический поиск, требуется `--wait`. `init` никогда не вызывает embedding; векторы строятся отдельно через `memory sync`.
 
@@ -66,7 +65,6 @@ EMBEDDING_DIMENSIONS=1536
 | `memory service up` | Один раз на машину: поднимает общие Qdrant и Typesense (идемпотентно), создаёт `global.env`. |
 | `memory service down\|status\|logs` | Останавливает, показывает состояние или логи общего стека. Данные сохраняются. |
 | `memory init [--wait]` | Создаёт конфигурацию и запускает структурную индексацию в фоне: `accepted` + `job_id`. Проверки сервисов выполняет worker; ошибки видны в состоянии задачи. `--wait` ждёт результат без embedding. |
-| `memory migrate` | Переносит старый проект со своим Docker на общий сервис (бэкап `.memory.bak-<дата>`, переиндексация). Флаги: `--scan <dir> [--apply]`, `--all`, `--cleanup`, `--rollback`. |
 | `memory status [--json]` | Показывает состояние сервисов, число файлов и chunks, `pending_embeddings`, ошибки, дату синхронизации и устаревшие файлы. |
 | `memory status --job <id>` | Только сохранённый прогресс задачи, без обхода проекта и сетевых health-check. |
 | `memory doctor` | Диагностирует Docker, Qdrant, Typesense, embeddings и манифест и показывает реальный режим поиска. |
@@ -187,13 +185,10 @@ memory doctor
 - Контейнер unhealthy: `memory service logs`.
 - Индекс расходится: `memory reindex` (перечитывает файлы и обновляет индексы без удаления).
 - Смена модели embeddings или размерности: текущий `memory reindex` не пересчитывает векторы уже проиндексированных chunks. Полного пересчёта пока нет.
-- Старый проект с `.memory/docker-compose.yml`: `memory migrate`, затем `memory doctor`.
 
 ## Rollback
 
 Общий сервис: `memory service down` (данные сохраняются). Ключи в `~/.config/project-memory/global.env` не удаляются.
-
-Миграция проекта: `memory migrate --rollback` восстанавливает `.memory` из самого нового `.memory.bak-<дата>` и поднимает старый compose. Откат не возвращает `data`, если была выполнена `memory migrate --cleanup`.
 
 Исходники проекта `memory` никогда не изменяет и не удаляет.
 
