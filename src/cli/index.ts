@@ -2,7 +2,7 @@
 import { Command } from 'commander';
 import { handleError } from './common.js';
 import { initCommand } from './commands/init.js';
-import { startCommand, statusCommand, stopCommand } from './commands/lifecycle.js';
+import { statusCommand } from './commands/lifecycle.js';
 import { reindexCommand, syncCommand, watchCommand } from './commands/indexing.js';
 import { docsCommand, mcpCommand, searchCommand } from './commands/search.js';
 import { doctorCommand } from './commands/doctor.js';
@@ -27,8 +27,6 @@ program.command('init').description('Create .memory/, start services, index the 
   .option('--no-index', 'skip initial indexing').option('--yes', 'non-interactive (default behaviour)')
   .option('--wait', 'wait for the structural index; embeddings require memory sync')
   .action(act(initCommand));
-program.command('start').option(path).description('Start Qdrant and Typesense').action(act(startCommand));
-program.command('stop').option(path).description('Stop services (data is kept)').action(act(stopCommand));
 program.command('status').option(path).option('--json').option('--job <id>', 'read saved job progress without scanning or health checks').description('Show index and service status').action(act(statusCommand));
 program.command('doctor').option(path).description('Diagnose the environment').action(act(doctorCommand));
 program.command('index').option(path).description('Index new and changed files').action(act((o) => syncCommand(o, 'index')));

@@ -1,10 +1,6 @@
 import { rootFrom, withContext } from '../common.js';
-import { startServices, stopServices } from '../docker.js';
 import { getStatus } from '../../project/status.js';
 import { jobStatus } from '../../indexing/job-manifest.js';
-
-export const startCommand = (o: { path?: string }) => { startServices(rootFrom(o.path)); console.log('Services are healthy.'); };
-export const stopCommand = (o: { path?: string }) => { stopServices(rootFrom(o.path)); console.log('Services stopped (data kept in .memory/data).'); };
 
 export async function statusCommand(o: { path?: string; json?: boolean; job?: string }): Promise<void> {
   if (o.job) { console.log(JSON.stringify(jobStatus(rootFrom(o.path), o.job), null, 2)); return; }
